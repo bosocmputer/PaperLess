@@ -4,8 +4,8 @@ Last updated: 2026-06-16
 
 ## Latest Handoff
 
-- Current production/dev state: **Phase 0 — planning/scaffold.** Repo initialized from `template-vibe-code`. Requirements, architecture, domain rules, DB schema, API contract, and SML integration notes are written. **No application code yet.**
-- Last completed change: authored `docs/` (architecture, domain, db-schema, api-contract, sml-integration-notes, testing) and `AGENTS.md`.
+- Current production/dev state: **Phase 0 — scaffold landed.** Repo initialized from `template-vibe-code`; docs written; Go API skeleton compiles and serves `/health` + `/health/ready`; core schema migration + dev seed verified (up/down) against a local Postgres.
+- Last completed change: scaffolded `apps/api` (Go/Gin/pgx, mirroring sml-api-bybos conventions: zap, request-id, `{success,data,meta}` envelope), `migrations/0001_init` + `0002_seed_dev` (POP workflow from the Excel example), `deploy/docker-compose.yml`, Dockerfile. Verified: migrations apply + reverse cleanly, partial-unique "one active version per doc format" enforced, `/health/ready` returns DB ok.
 - Current branch/release: `main` (fresh `git init`, not yet committed).
 - Known broken or risky areas: SML Confirm/Lock table/field unknown — blocks Phase 3 sync, not Phase 1/2 (mock gateway).
 
@@ -20,9 +20,9 @@ Last updated: 2026-06-16
 ## Active Work
 
 - Goal: stand up Phase 1 pilot — manual upload, workflow config (POP/INV), inbox, mobile signing (condition 1/2/3), audit, final PDF.
-- In progress: documentation/scaffold complete; next is repo skeleton (apps/api, apps/web, workers, migrations, compose).
+- In progress: API rail is up. Next: pick a migration runner (e.g. golang-migrate) and wire `migrate up/down`; then auth + RBAC; then document import (idempotency_key + source_hash) and the workflow engine.
 - Blocked: SML confirm/lock fields (Phase 3 only).
-- Next safest step: scaffold `apps/api` (Go, mirror sml-api-bybos layout) + first migration + Docker Compose, then health/ready green before any feature.
+- Next safest step: add the migration runner + a `go test` for the workflow condition-1 race (highest-risk logic), then build import → inbox → sign vertically against the POP seed.
 
 ## Known Gaps
 
