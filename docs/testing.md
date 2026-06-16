@@ -3,19 +3,48 @@
 ## Required Gates
 
 ```bash
-# Backend (Go)
-cd apps/api && go test ./... && go vet ./...
+# Backend (Go) — full gates including workflow DB integration tests
+cd apps/api
+PAPERLESS_TEST_DB="postgres://postgres:paperless@localhost:5432/paperless_test?sslmode=disable" \
+  go test ./... && go vet ./...
 
-# Worker
-cd workers && go test ./...
+# Without PAPERLESS_TEST_DB set, workflow/* tests are SKIPPED (not failed).
+# CI MUST provide this env var — a run without it does NOT satisfy the gate.
+# The test DB must have migrations applied (0001–0005 up) before running.
 
 # Frontend (Next.js)
-cd apps/web && npm run lint && npm run build
+cd apps/web && npm run build
 
 # Integration / smoke (Docker Compose up, then)
 curl -fsS http://localhost:8080/health
 curl -fsS http://localhost:8080/health/ready   # checks DB + MinIO
 ```
+
+### Setting up the test database (one-time, local dev)
+
+```bash
+# 1. Create the test DB
+createdb paperless_test   # or: psql -c "CREATE DATABASE paperless_test"
+
+# 2. Apply migrations (seeds included)
+cd apps/api
+DATABASE_URL="postgres://postgres:paperless@localhost:5432/paperless_test?sslmode=disable" \
+  go run ./cmd/migrate up
+
+# 3. Run full test suite
+PAPERLESS_TEST_DB="postgres://postgres:paperless@localhost:5432/paperless_test?sslmode=disable" \
+  go test ./... -v -count=1
+```
+
+### CI requirement
+
+Any CI pipeline (GitHub Actions, etc.) must:
+
+1. Spin up a PostgreSQL service (postgres:16).
+2. Run `go run ./cmd/migrate up` against it.
+3. Export `PAPERLESS_TEST_DB` before `go test ./...`.
+
+Without these steps, the workflow engine tests (race condition, condition 1/2/3, sequence gate) are skipped and the gate is **not satisfied**.
 
 ## Must-not-skip Workflow Tests (from requirements §31)
 

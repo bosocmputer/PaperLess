@@ -308,7 +308,7 @@ func isDocumentComplete(ctx context.Context, tx pgx.Tx, docID int64) (bool, erro
 	var incomplete int
 	err := tx.QueryRow(ctx, `
 		SELECT COUNT(*) FROM signature_tasks
-		 WHERE document_id=$1 AND status NOT IN ('signed','skipped','cancelled')
+		 WHERE document_id=$1 AND status NOT IN ('signed','skipped','cancelled','rejected')
 	`, docID).Scan(&incomplete)
 	if err != nil {
 		return false, err
