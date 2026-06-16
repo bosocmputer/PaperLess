@@ -22,7 +22,7 @@ SML_API_KEY=...                        # X-Api-Key for sml-api-bybos
 SML_TENANT=...                         # X-Tenant
 ```
 
-## Commands (planned, mirror sml-api-bybos)
+## Commands (mirror sml-api-bybos)
 
 ```bash
 # build + run locally
@@ -32,8 +32,18 @@ docker compose up -d --build
 curl -fsS http://localhost:8080/health
 curl -fsS http://localhost:8080/health/ready
 
-# migrate
-docker compose run --rm api ./migrate up      # reversible; ./migrate down to roll back
+# migrations (uses golang-migrate, source: apps/api/migrations/)
+# dev: run from apps/api/ with DATABASE_URL in env or .env
+go run ./cmd/migrate up          # apply all pending migrations
+go run ./cmd/migrate down        # roll back all
+go run ./cmd/migrate version     # show current schema version
+go run ./cmd/migrate force 2     # force version (use after a failed partial migration)
+
+# docker: the api image bakes the binary; pass MIGRATIONS_PATH if needed
+docker compose run --rm api /app/migrate up
+
+# optional MIGRATIONS_PATH override (for custom deploy layout)
+MIGRATIONS_PATH=/path/to/migrations go run ./cmd/migrate up
 ```
 
 ## Release Checklist
