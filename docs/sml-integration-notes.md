@@ -18,6 +18,8 @@ PaperLess integrates with SML **only** through `sml-api-bybos` (Go/Gin/pgx gatew
 
 ## Open questions for the SML team (send early — these gate Phase 3)
 
+> A ready-to-send, fill-in form of these questions (Thai, with priority + impact + answer fields) lives in **`docs/sml-questions.md`**. Send that to the SML team and commit their answers back.
+
 1. **How will SML deliver the PDF + metadata to PaperLess?** Options: (a) sml-api reads existing SML tables and PaperLess pulls on demand; (b) SML renders/stores a PDF we can fetch; (c) watched folder; (d) scheduled push; (e) manual upload only. We assume (a)/(e) until told otherwise.
 2. **Which SML table/field represents "Confirm"?** (e.g. a flag on `ic_trans` / `ap_ar_trans`?) What is the exact write (column, value, any timestamp/user fields)?
 3. **Which SML table/field represents "Lock"?** Same detail. Is lock idempotent (safe to write twice)?
