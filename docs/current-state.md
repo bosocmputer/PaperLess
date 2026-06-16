@@ -22,7 +22,7 @@ Last updated: 2026-06-16
 - Goal: stand up Phase 1 pilot — manual upload, workflow config (POP/INV), inbox, mobile signing (condition 1/2/3), audit, final PDF.
 - In progress: API rail is up. Next: pick a migration runner (e.g. golang-migrate) and wire `migrate up/down`; then auth + RBAC; then document import (idempotency_key + source_hash) and the workflow engine.
 - Blocked: SML confirm/lock fields (Phase 3 only).
-- Next safest step: add the migration runner + a `go test` for the workflow condition-1 race (highest-risk logic), then build import → inbox → sign vertically against the POP seed.
+- Next safest step: follow `docs/phase1-plan.md` (backend-first, risk-ordered): migration runner → auth → workflow engine + tests (condition-1 race) → import → sign → final PDF → UI. SML is mocked in Phase 1; no SML answer is needed to start.
 
 ## Known Gaps
 
