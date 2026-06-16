@@ -57,9 +57,13 @@ func (h *TaskHandler) Inbox(c *gin.Context) {
 		 WHERE assigned_user_id=$1 AND status='open'
 	`, claims.UserID).Scan(&total)
 
+	// Cast timestamptz/date/numeric to text in SQL so they scan cleanly into
+	// *string for JSON. (Text→text on the read path is a valid pgx decode; the
+	// reverse int→text on the write path is not — see the audit-log fix.)
 	rows, err := h.pool.Query(ctx, `
 		SELECT st.id, st.document_id, st.sequence_no, st.condition_type, st.status,
-		       st.opened_at, d.doc_format_code, d.doc_no, d.revision, d.doc_date, d.amount
+		       st.opened_at::text, d.doc_format_code, d.doc_no, d.revision,
+		       d.doc_date::text, d.amount::text
 		  FROM signature_tasks st
 		  JOIN documents d ON d.id = st.document_id
 		 WHERE st.assigned_user_id=$1 AND st.status='open'

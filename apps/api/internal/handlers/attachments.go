@@ -151,7 +151,7 @@ func (h *AttachmentHandler) List(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	rows, err := h.pool.Query(ctx, `
-		SELECT id, object_key, mime_type, size_bytes, uploaded_by_user_id, created_at
+		SELECT id, object_key, mime_type, size_bytes, uploaded_by_user_id, created_at::text
 		  FROM document_files
 		 WHERE document_id=$1 AND file_type='attachment'
 		 ORDER BY created_at

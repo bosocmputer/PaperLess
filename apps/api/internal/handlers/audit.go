@@ -51,7 +51,7 @@ func (h *AuditHandler) AuditLogs(c *gin.Context) {
 		CreatedAt  string  `json:"created_at"`
 	}
 	rows, err := h.pool.Query(ctx, `
-		SELECT id, actor_type, actor_id, action, entity_type, entity_id, reason, created_at
+		SELECT id, actor_type, actor_id, action, entity_type, entity_id, reason, created_at::text
 		  FROM audit_logs
 		 WHERE entity_type='document' AND entity_id=$1
 		 ORDER BY created_at
@@ -85,7 +85,7 @@ func (h *AuditHandler) AuditLogs(c *gin.Context) {
 	}
 	sigRows, err := h.pool.Query(ctx, `
 		SELECT id, task_id, signer_type, signer_name, action, comment,
-		       host(ip_address) AS ip_str, signed_at
+		       host(ip_address) AS ip_str, signed_at::text
 		  FROM signature_events
 		 WHERE document_id=$1
 		 ORDER BY signed_at

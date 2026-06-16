@@ -371,6 +371,29 @@ func createTasksForSequence(ctx context.Context, tx pgx.Tx, docID int64, templat
 		return err
 	}
 
+	// Guard against silently producing zero tasks for a non-empty sequence.
+	// A sequence that contains steps but yields no assignee tasks (e.g. a
+	// condition_type=3 external step, whose import-time signer creation is not
+	// yet built) must NOT be skipped — skipping it lets isDocumentComplete see
+	// no pending tasks and mark the document `completed` while the step was
+	// never actually signed. Return an error so the caller aborts the tx and
+	// the document stays in its prior (pending) state instead.
+	var stepCount, externalStepCount int
+	if err := tx.QueryRow(ctx, `
+		SELECT COUNT(*),
+		       COUNT(*) FILTER (WHERE condition_type = 3)
+		  FROM workflow_steps
+		 WHERE workflow_template_id=$1 AND sequence_no=$2
+	`, templateID, seqNo).Scan(&stepCount, &externalStepCount); err != nil {
+		return fmt.Errorf("count steps for sequence %d: %w", seqNo, err)
+	}
+	if len(assignees) == 0 && stepCount > 0 {
+		if externalStepCount > 0 {
+			return fmt.Errorf("sequence %d requires an external signer (condition_type=3) which is not yet supported on import; document left pending", seqNo)
+		}
+		return fmt.Errorf("sequence %d has %d step(s) but no assignees; cannot open tasks", seqNo, stepCount)
+	}
+
 	for _, a := range assignees {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO signature_tasks
