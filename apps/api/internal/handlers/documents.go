@@ -227,8 +227,8 @@ func (h *DocumentHandler) Import(c *gin.Context) {
 	}
 	_, _ = tx.Exec(ctx, `
 		INSERT INTO audit_logs (actor_type, actor_id, action, entity_type, entity_id)
-		VALUES ('user', $1, 'document_imported', 'document', $2::text)
-	`, actorID, docID)
+		VALUES ('user', $1, 'document_imported', 'document', $2)
+	`, actorID, strconv.FormatInt(docID, 10))
 
 	if err := tx.Commit(ctx); err != nil {
 		h.log.Error("import: commit", zap.Error(err))

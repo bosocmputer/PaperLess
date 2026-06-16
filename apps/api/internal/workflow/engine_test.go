@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -28,6 +29,19 @@ func testDB(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 	return pool
+}
+
+// cleanupDoc removes a test document and its dependent rows. signature_events
+// has no ON DELETE CASCADE on document_id (it is append-only evidence by
+// design — see migrations/0001), and audit_logs is decoupled by string id, so
+// a plain DELETE on documents would be blocked by the FK and silently leak test
+// rows. We delete the evidence rows explicitly here (test DB only) so the
+// document delete — and any subsequent migration down — succeeds.
+func cleanupDoc(pool *pgxpool.Pool, docID int64) {
+	ctx := context.Background()
+	_, _ = pool.Exec(ctx, `DELETE FROM signature_events WHERE document_id=$1`, docID)
+	_, _ = pool.Exec(ctx, `DELETE FROM audit_logs WHERE entity_type='document' AND entity_id=$1`, strconv.FormatInt(docID, 10))
+	_, _ = pool.Exec(ctx, `DELETE FROM documents WHERE id=$1`, docID)
 }
 
 // seed inserts minimal rows needed for engine tests and returns doc/task IDs.
@@ -105,9 +119,7 @@ func seedWorkflow(t *testing.T, pool *pgxpool.Pool) (docID int64, makerTaskID, c
 	}
 
 	// Cleanup: delete test doc (cascades to tasks/events).
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM documents WHERE id=$1`, docID)
-	})
+	t.Cleanup(func() { cleanupDoc(pool, docID) })
 	return
 }
 
@@ -144,7 +156,7 @@ func TestCondition1_AnyOneSigns_OthersBecomeSkipped(t *testing.T) {
 		INSERT INTO documents (doc_format_code, doc_no, revision, workflow_template_id, workflow_version, status, idempotency_key, source_hash)
 		VALUES ('POP', $1, 0, $2, 1, 'pending', $3, 'c1hash') RETURNING id
 	`, fmt.Sprintf("C1TEST-%d", time.Now().UnixNano()), templateID, idKey).Scan(&docID)
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM documents WHERE id=$1`, docID) })
+	t.Cleanup(func() { cleanupDoc(pool, docID) })
 
 	_ = pool.QueryRow(ctx, `
 		INSERT INTO signature_tasks (document_id, workflow_step_id, assigned_user_id, sequence_no, condition_type, status, opened_at)
@@ -196,7 +208,7 @@ func TestCondition1_Race_ExactlyOneWins(t *testing.T) {
 		INSERT INTO documents (doc_format_code, doc_no, revision, workflow_template_id, workflow_version, status, idempotency_key, source_hash)
 		VALUES ('POP', $1, 0, $2, 1, 'pending', $3, 'racehash') RETURNING id
 	`, fmt.Sprintf("RACE-%d", time.Now().UnixNano()), templateID, idKey).Scan(&docID)
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM documents WHERE id=$1`, docID) })
+	t.Cleanup(func() { cleanupDoc(pool, docID) })
 
 	_ = pool.QueryRow(ctx, `
 		INSERT INTO signature_tasks (document_id, workflow_step_id, assigned_user_id, sequence_no, condition_type, status, opened_at)
@@ -274,7 +286,7 @@ func TestCondition2_AllMustSign(t *testing.T) {
 		INSERT INTO documents (doc_format_code, doc_no, revision, workflow_template_id, workflow_version, status, idempotency_key, source_hash)
 		VALUES ('POP', $1, 0, $2, 1, 'pending', $3, 'c2hash') RETURNING id
 	`, fmt.Sprintf("C2TEST-%d", time.Now().UnixNano()), templateID, idKey).Scan(&docID)
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM documents WHERE id=$1`, docID) })
+	t.Cleanup(func() { cleanupDoc(pool, docID) })
 
 	_ = pool.QueryRow(ctx, `
 		INSERT INTO signature_tasks (document_id, workflow_step_id, assigned_user_id, sequence_no, condition_type, status, opened_at)
@@ -382,8 +394,8 @@ func TestReject_RequiresReason_WritesAudit(t *testing.T) {
 
 	var auditCount int
 	_ = pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM audit_logs WHERE entity_type='document' AND entity_id=$1::text AND action='document_rejected'`,
-		docID,
+		`SELECT COUNT(*) FROM audit_logs WHERE entity_type='document' AND entity_id=$1 AND action='document_rejected'`,
+		strconv.FormatInt(docID, 10),
 	).Scan(&auditCount)
 	if auditCount == 0 {
 		t.Error("expected audit_log entry for document_rejected, found none")
@@ -446,7 +458,7 @@ func TestExternalToken_Expired(t *testing.T) {
 		INSERT INTO documents (doc_format_code, doc_no, revision, workflow_template_id, workflow_version, status, idempotency_key, source_hash)
 		VALUES ('POP', $1, 0, $2, 1, 'pending', $3, 'exthash') RETURNING id
 	`, fmt.Sprintf("EXT-%d", time.Now().UnixNano()), templateID, idKey).Scan(&docID)
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM documents WHERE id=$1`, docID) })
+	t.Cleanup(func() { cleanupDoc(pool, docID) })
 
 	// External signer with expired token.
 	var extSignerID int64

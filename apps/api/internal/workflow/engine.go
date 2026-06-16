@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -414,10 +415,14 @@ func writeRejectEvent(ctx context.Context, tx pgx.Tx, in RejectInput, task Task)
 }
 
 func writeAuditLog(ctx context.Context, tx pgx.Tx, action, entityType string, entityID int64, actorID int64) error {
+	// audit_logs.actor_id and entity_id are text columns. Convert the int64 ids
+	// to string in Go rather than relying on a SQL ::text cast — pgx binds the
+	// Go type to the column's OID before the cast runs, and int64 → text is not
+	// a valid encode plan (fails with "cannot find encode plan" / OID 25).
 	_, err := tx.Exec(ctx, `
 		INSERT INTO audit_logs (actor_type, actor_id, action, entity_type, entity_id)
-		VALUES ('user', $1::text, $2, $3, $4::text)
-	`, actorID, action, entityType, entityID)
+		VALUES ('user', $1, $2, $3, $4)
+	`, strconv.FormatInt(actorID, 10), action, entityType, strconv.FormatInt(entityID, 10))
 	return err
 }
 

@@ -53,9 +53,9 @@ func (h *AuditHandler) AuditLogs(c *gin.Context) {
 	rows, err := h.pool.Query(ctx, `
 		SELECT id, actor_type, actor_id, action, entity_type, entity_id, reason, created_at
 		  FROM audit_logs
-		 WHERE entity_type='document' AND entity_id=$1::text
+		 WHERE entity_type='document' AND entity_id=$1
 		 ORDER BY created_at
-	`, docID)
+	`, strconv.FormatInt(docID, 10))
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
 		return

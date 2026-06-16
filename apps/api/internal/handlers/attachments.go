@@ -130,8 +130,8 @@ func (h *AttachmentHandler) Upload(c *gin.Context) {
 	// Audit.
 	_, _ = h.pool.Exec(ctx, `
 		INSERT INTO audit_logs (actor_type, actor_id, action, entity_type, entity_id)
-		VALUES ('user', $1::text, 'attachment_uploaded', 'file', $2::text)
-	`, claims.UserID, fileID)
+		VALUES ('user', $1, 'attachment_uploaded', 'file', $2)
+	`, strconv.FormatInt(claims.UserID, 10), strconv.FormatInt(fileID, 10))
 
 	httpx.OK(c, http.StatusCreated, gin.H{
 		"id":         fileID,
@@ -223,8 +223,8 @@ func (h *AttachmentHandler) Delete(c *gin.Context) {
 
 	_, _ = h.pool.Exec(ctx, `
 		INSERT INTO audit_logs (actor_type, actor_id, action, entity_type, entity_id)
-		VALUES ('user', $1::text, 'attachment_deleted', 'file', $2::text)
-	`, claims.UserID, fileID)
+		VALUES ('user', $1, 'attachment_deleted', 'file', $2)
+	`, strconv.FormatInt(claims.UserID, 10), strconv.FormatInt(fileID, 10))
 
 	httpx.OK(c, http.StatusOK, gin.H{"message": "deleted"})
 }
