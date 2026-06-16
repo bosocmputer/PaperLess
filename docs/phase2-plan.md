@@ -35,22 +35,27 @@ The Phase 1 guard in `createTasksForSequence` aborts when a sequence yields zero
 assignee tasks. Replace "abort" with "create an external task" for
 `condition_type=3` steps.
 
-- On import (or when `openNextSequence` reaches an external step), for each
-  `condition_type=3` step create **one** `signature_tasks` row with
-  `external_signer_id` set and `assigned_user_id` NULL, status `open`.
-- The `external_signers` row itself is created when the external signer is
-  **invited** (Step 3), not at import — so at import the external task may be
-  `waiting` until invited, OR import accepts external-signer contact fields and
-  creates the row immediately. **Pick one and document it in `docs/domain.md`.**
-  Recommended: create the `external_signers` row at invite time; the external
-  task opens (`waiting`→`open`) when the signer is invited and the sequence is reached.
+**Decision (do NOT re-litigate):** the `external_signers` row is created at
+**invite** time (Step 2), not at import. At import/sequence-open, the external
+step's `signature_tasks` row is created with status **`waiting`** and
+`external_signer_id` NULL. The invite (Step 2) sets `external_signer_id` and
+flips the task `waiting`→`open`. This keeps "who the external signer is" out of
+the import payload and makes invite the single place a signer identity is born.
+
+- For each `condition_type=3` step in the opening sequence, create **one**
+  `signature_tasks` row: `assigned_user_id` NULL, `external_signer_id` NULL,
+  `condition_type=3`, status `waiting`.
 - Keep the Phase 1 invariant: a non-external sequence that yields zero tasks
-  still errors (never silently completes). Only `condition_type=3` is exempt.
+  still errors (never silently completes). Only `condition_type=3` is exempt —
+  it produces a `waiting` task instead of erroring.
+- **Document-completion impact:** `isDocumentComplete` must NOT treat a `waiting`
+  external task as terminal (it already excludes non-terminal statuses — confirm
+  `waiting` is excluded so an un-invited external step keeps the doc pending).
 - **Done when:** importing a doc whose active template has an external step no
-  longer 500s/false-completes; the external step sits pending until invited; an
-  integration test (gated on `PAPERLESS_TEST_DB`) covers it. Re-activate a
-  template with an external step in a **test-only** seed — do NOT make the POP
-  pilot template external.
+  longer 500s/false-completes; the external step sits `waiting` (doc stays
+  `pending`) until invited; an integration test (gated on `PAPERLESS_TEST_DB`)
+  covers it. Use a **test-only** template with an external step (or activate
+  `DEMO3` inside the test tx) — do NOT make the POP pilot template external.
 
 ## Step 2 — Token issuance + invite (internal API)  ← SECURITY-SENSITIVE
 
@@ -70,25 +75,46 @@ assignee tasks. Replace "abort" with "create an external task" for
 
 These are the only unauthenticated routes. Treat every input as hostile.
 
-- `GET /external/sign/:token` → resolve by `sha256(token)`; return the document
-  view payload (doc metadata + original PDF access) **only** if the token is
-  valid, unused, unexpired. On bad/expired/used token return a clear,
-  non-enumerable error (same shape for "not found" vs "expired" is fine, but the
-  UI needs to tell the signer it expired — return a stable `code`).
-- `POST /external/sign/:token` → body = `{signature_image_hash, consent_text}`;
-  calls `engine.ExternalSign`. Enforce: token valid+unexpired+unused, signature
-  present, `request_id` idempotency (reuse the engine's event-dedup).
-- Optional OTP gate (behind a flag): `POST /external/sign/:token/otp` issues an
-  OTP to the signer's phone/email; `ExternalSign` is refused until
-  `otp_verified_at` is set. **Phase 2 may stub OTP delivery** (log to server,
-  not to client) but must enforce the verified-gate if the flag is on. Default
-  flag OFF for the pilot.
-- Rate-limit the public routes (per-token + per-IP) to blunt token brute-force.
+**Token transport:** the token is a bearer credential — do NOT put it in the URL
+path or query string (it leaks into access logs, proxies, browser history,
+Referer headers). The browser holds it in memory after the first load and sends
+it as a header: `X-Signer-Token: <raw>`. The first navigation can use a path
+(`/external/[token]` page route, Step 5) but every **API** call carries the token
+in the header, not the path. So the endpoints are:
+
+- `GET /external/document` (header `X-Signer-Token`) → resolve by
+  `sha256(token)`; return the document view payload (doc metadata + a way to view
+  the original PDF — see below) **only** if the token is valid, unused,
+  unexpired. On bad/expired/used token return a stable machine `code`
+  (`external_link_expired` / `external_link_used` / `external_link_invalid`) with
+  a generic message; do not reveal whether a doc exists.
+- **Original PDF for the external signer:** add
+  `GET /external/document/file/original` (header `X-Signer-Token`) that streams
+  the original PDF **only** after the same token check. Do NOT reuse the
+  auth-only `/documents/:id/file/original`, and do NOT expose a public
+  doc-id route. (If you prefer a short-lived MinIO presigned URL instead of
+  streaming, that is acceptable — but the presign must be minted only after the
+  token check and expire in minutes.)
+- `POST /external/sign` (header `X-Signer-Token`) → body =
+  `{signature_image_hash, consent_text}`; calls `engine.ExternalSign`. Enforce:
+  token valid+unexpired+unused, signature present, `request_id` idempotency
+  (reuse the engine's event-dedup).
+- Optional OTP gate (behind a flag): `POST /external/sign/otp` (header
+  `X-Signer-Token`) issues an OTP to the signer's phone/email; `ExternalSign` is
+  refused until `otp_verified_at` is set. **Phase 2 may stub OTP delivery** (log
+  to server, **never** return the OTP in the response) but must enforce the
+  verified-gate if the flag is on. Default flag OFF for the pilot.
+- **Rate-limit the public routes** (per-token + per-IP). Token lookup is by
+  `sha256(token)` against a UNIQUE index — constant-ish, but still cap attempts
+  per IP (e.g. simple in-memory token-bucket or a `failed_attempts` counter) so a
+  stolen-link-guessing client is throttled. A simple per-IP limiter is enough for
+  the pilot; note it explicitly rather than leaving the routes unbounded.
 - A used or expired token must return the same "cannot sign" state the engine
   raises — never a 500.
 - **Done when:** a valid token signs exactly once; reuse → rejected; expired →
   rejected; tampered/long/garbage token → rejected without a stack trace;
-  tests cover all four; raw token never appears in logs.
+  rate-limit triggers under repeated bad tokens; tests cover all of these; raw
+  token never appears in logs or any response body.
 
 ## Step 4 — Final PDF includes the external signer
 
@@ -101,10 +127,13 @@ These are the only unauthenticated routes. Treat every input as hostile.
 
 ## Step 5 — Frontend: public external-sign page (mobile-first PWA)
 
-- Route `/external/[token]`: no app shell / no login. Loads via
-  `GET /external/sign/:token`; shows doc PDF (pdf.js, lazy), `SignaturePad`
-  (reuse the Phase 1 component — touch-safe, no scroll-while-signing),
-  preview-before-submit, consent checkbox with the พ.ร.บ. 2544 text.
+- Route `/external/[token]`: no app shell / no login. On load, read the token
+  from the path **once**, keep it in component state/memory, and send it on every
+  API call as the `X-Signer-Token` header (calls hit `/external/document`,
+  `/external/document/file/original`, `/external/sign`). Do not echo the token
+  into other URLs. Shows doc PDF (pdf.js, lazy), `SignaturePad` (reuse the Phase
+  1 component — touch-safe, no scroll-while-signing), preview-before-submit,
+  consent checkbox with the พ.ร.บ. 2544 text.
 - Explicit error states (reuse `ErrorState`): `external_link_expired`,
   `external_link_used`, `external_signer_info_missing`, `signature_required`,
   network-drop-during-submit (show "กำลังตรวจสอบสถานะ", rely on `request_id`).
@@ -162,13 +191,15 @@ These are the only unauthenticated routes. Treat every input as hostile.
 - [ ] Migrations up→down→up clean on a throwaway DB; new migration only (0001–0005 untouched).
 
 ### External signer — security (highest risk)
-- [ ] Token stored as SHA-256 hash only; raw token returned once; never in logs (grep).
+- [ ] Token stored as SHA-256 hash only; raw token returned once; never in logs/response bodies (grep).
+- [ ] Token carried in `X-Signer-Token` header, NOT in the API URL path/query (won't leak to access logs/Referer). Page route `/external/[token]` is the only place the raw token sits in a URL.
+- [ ] Public original-PDF endpoint streams only after the token check; the auth-only `/documents/:id/file/original` is NOT reused and no public doc-id route exists.
 - [ ] Public sign endpoints carry NO JWT requirement; all other routes still guarded.
 - [ ] Valid token signs exactly once; reuse → rejected; expired → rejected; garbage/oversized token → rejected with a clean error (no 500/stack trace).
 - [ ] `request_id` idempotency on external sign → one signature_event.
 - [ ] Token validation + state re-checked from DB inside the tx; signer row-locked.
-- [ ] Rate limiting present on public routes.
-- [ ] OTP gate (if flag on) actually blocks signing until verified; delivery not leaked to client.
+- [ ] Rate limiting present on public routes (per-IP at minimum); triggers under repeated bad tokens.
+- [ ] OTP gate (if flag on) actually blocks signing until verified; OTP never returned in a response.
 
 ### External signer — correctness
 - [ ] Import no longer false-completes a doc with an external step (Phase 1 bug stays fixed); non-external zero-task sequence still errors.
