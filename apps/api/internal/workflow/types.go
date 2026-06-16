@@ -76,11 +76,11 @@ type RejectInput struct {
 
 // StepProgress describes how far through a step we are.
 type StepProgress struct {
-	SequenceNo    int
-	ConditionType ConditionType
-	SignedCount   int
-	TotalCount    int
-	Complete      bool
+	SequenceNo    int           `json:"sequence_no"`
+	ConditionType ConditionType `json:"condition_type"`
+	SignedCount   int           `json:"signed_count"`
+	TotalCount    int           `json:"total_count"`
+	Complete      bool          `json:"complete"`
 }
 
 // ErrStepAlreadyActioned is returned when a condition-1 step was completed by

@@ -4,10 +4,11 @@ Last updated: 2026-06-16
 
 ## Latest Handoff
 
-- Current production/dev state: **Phase 1 complete.** All 7 steps of `docs/phase1-plan.md` are implemented and green.
-- Last completed change: Full Phase 1 build — migration runner, auth+RBAC, workflow engine, document import, sign/reject API, attachments+audit viewer, final PDF generation, Next.js PWA frontend.
+- Current production/dev state: **Phase 1 complete and audited (PASS).** All 7 steps of `docs/phase1-plan.md` implemented; verified end-to-end against a real stack (Docker Postgres + MinIO + API), not just compile/unit.
+- Last completed change: Opus audit re-run with a live DB caught + fixed 4 runtime bugs the unit suite missed (see commits f1cc2dd, 7d4ae59): (1) audit-log int→text pgx encode failure on every sign/reject; (2) inbox/audit/attachments 500s from scanning timestamptz/numeric into *string; (3) external-step templates silently auto-completing; (4) test cleanup leaking rows + breaking `migrate down`. POP happy-path now drives import → sign 3 steps → completed → final PDF (valid, with verification code + พ.ร.บ. 2544 legal text). All security invariants verified live (re-sign 409, non-assignee 403, role-guard 403, no-auth 401, double-tap idempotent).
 - Current branch/release: `main`
-- Known broken or risky areas: SML Confirm/Lock table/field unknown — blocks Phase 3 sync, not Phase 1/2 (mock gateway). Final PDF uses evidence-page approach (not coordinate stamping) — Phase 3 enhancement once SML answers Q8.
+- Known broken or risky areas: **condition_type=3 (external signer) import flow is NOT built** — engine handles external sign + token expiry, but import does not create external-signer tasks, so any ACTIVE template with an external step would leave docs stuck pending (now guarded: engine errors instead of false-completing). The 3-condition demo lives on a separate `DEMO3` *draft* template; the active POP template is 3 internal steps. SML Confirm/Lock unknown — Phase 3 (mock gateway). Final PDF uses evidence-page approach (coordinate stamping deferred, SML Q8).
+- Non-blocking nits: `StepProgress` JSON from `/workflow-status` is PascalCase (`SequenceNo`) but the web client expects snake_case — wire-up mismatch to reconcile before the UI consumes it. Handler layer has no automated tests (engine is covered).
 
 ## Runtime Snapshot
 
