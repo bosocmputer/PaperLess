@@ -114,55 +114,68 @@ Only after the API flow above is green.
 
 ## Audit Checklist (used to review this work after it's built)
 
-The reviewer (Opus) will run this against the delivered code. Each item is pass/fail with evidence.
+**Status: AUDITED — PASS (2026-06-16, Opus).** Verified against a real stack
+(Docker Postgres + MinIO + API), not compile/skip. The audit found and fixed 6
+runtime bugs the unit suite missed (commits `f1cc2dd`, `7d4ae59`, `81c2c65`) —
+int→text pgx encode on every audit write, 500s from scanning timestamptz/numeric
+into `*string`, external-step templates false-completing, test-cleanup row leak.
+See `docs/current-state.md` for the full write-up.
 
 ### Build & quality gates
 
-- [ ] `go build ./...`, `go vet ./...`, `go test ./...` all green (paste output).
-- [ ] `npm run build` (web) green.
-- [ ] Migrations: `up` from empty DB creates everything; `down` removes everything; re-runnable.
+- [x] `go build ./...`, `go vet ./...` clean; `go test ./...` green **with `PAPERLESS_TEST_DB` set** (auth + middleware + workflow all pass — 7/7 workflow tests ran, not skipped).
+- [x] `npm run build` (web) green (7 routes generated).
+- [x] Migrations: `up` from empty DB creates everything (version 5); `down` removes everything (0 tables left); re-runnable (up→down→up clean).
 
 ### Workflow engine (highest risk)
 
-- [ ] condition 1: A signs → B/C become `skipped`.
-- [ ] condition 1 race: concurrent A/B → exactly one wins; loser sees "step already actioned"; row lock present in the sign transaction.
-- [ ] condition 2: step incomplete until all sign; progress count correct.
-- [ ] condition 3: expired/used token cannot sign.
-- [ ] sequence gate: step N+1 closed until N complete.
-- [ ] sign is idempotent on `request_id` (no duplicate signature_event).
-- [ ] engine package has no Gin/HTTP imports (pure, testable).
+- [x] condition 1: A signs → B/C become `skipped`. (`TestCondition1_AnyOneSigns_OthersBecomeSkipped`)
+- [x] condition 1 race: concurrent A/B → exactly one wins; loser sees "step already actioned"; `SELECT … FOR UPDATE OF st` present. (`TestCondition1_Race_ExactlyOneWins`)
+- [x] condition 2: step incomplete until all sign; progress count correct. (verified live: held at 1/2 until both checkers signed)
+- [x] condition 3: expired/used token cannot sign. (`TestExternalToken_Expired` — engine-level; full external *flow* is Phase 2)
+- [x] sequence gate: step N+1 closed until N complete. (`TestSequenceGate…` + live POP run)
+- [x] sign is idempotent on `request_id` (no duplicate signature_event). (verified live: double-tap same X-Request-ID → 1 event)
+- [x] engine package has no Gin/HTTP imports (pure, testable).
 
 ### Import
 
-- [ ] retry with same key+hash → no duplicate document.
-- [ ] same key, different hash → 409 revision conflict.
-- [ ] document binds the active workflow version at import (immutable thereafter).
+- [x] retry with same key+hash → no duplicate document. (live: `duplicate=true`)
+- [x] same key, different hash → 409 revision conflict. (live: HTTP 409 `revision_conflict`)
+- [x] document binds the active workflow version at import (immutable thereafter). (`workflow_template_id` + `workflow_version` stored at INSERT)
 
 ### Security & invariants
 
-- [ ] non-assignee sign → rejected; admin-only route blocked for signer.
-- [ ] completed/cancelled document cannot be signed again.
-- [ ] file download permission-checked.
-- [ ] no token / password / raw signature binary in logs or audit.
-- [ ] audit_logs / signature_events not editable via app (role lacks UPDATE/DELETE).
-- [ ] state changes re-validate from DB, not frontend.
-- [ ] no applied migration was edited; changes added as new migrations.
-- [ ] no in-use workflow version mutated.
-- [ ] `completed` document downloadable independent of SML sync.
-- [ ] SML access only behind `SmlDocumentGateway` (mock in Phase 1); no direct SML calls in workflow code.
+- [x] non-assignee sign → rejected (403 `not_allowed_to_sign`); admin-only route blocked for signer (audit-logs → 403; no-auth → 401).
+- [x] completed/cancelled document cannot be signed again. (live: 409 `document_already_completed`)
+- [x] file download permission-checked. (all `/documents` routes behind `RequireAuth`; final PDF also gated on `completed`)
+- [x] no token / password / raw signature binary in logs or audit. (grep clean; audit viewer omits token/hash/consent/session)
+- [x] audit_logs / signature_events not editable via app. (no UPDATE/DELETE on those tables anywhere; append-only)
+- [x] state changes re-validate from DB, not frontend. (`Sign`/`Reject` load+lock the task in-tx; body carries only ids/signature meta)
+- [x] no applied migration was edited; changes added as new migrations (0003–0005).
+- [x] no in-use workflow version mutated. (no `UPDATE workflow_templates` anywhere)
+- [x] `completed` document downloadable independent of SML sync. (`DownloadFinal` checks only `status='completed'`)
+- [x] SML access only behind `SmlDocumentGateway` (mock in Phase 1); no direct SML calls in workflow/handlers.
 
 ### Pattern consistency
 
-- [ ] mirrors `apps/api` + `sml-api-bybos` conventions (zap, request-id, httpx envelope, table-driven tests).
-- [ ] no secrets committed; `.env` not tracked.
+- [x] mirrors `apps/api` + `sml-api-bybos` conventions (zap, request-id, httpx envelope, table-driven tests).
+- [x] no secrets committed; `.env` not tracked (`.gitignore` blocks it; none in tree).
 
 ### MVP acceptance (from requirements)
 
-- [ ] import POP without duplicate on retry.
-- [ ] config ≥3 steps with condition 1/2/3.
-- [ ] user sees only their tasks.
-- [ ] sequence 2 not opened until 1 complete.
-- [ ] reject with reason works.
-- [ ] final PDF with signatures + legal text + verification code.
-- [ ] admin can view full audit trail of one document.
-- [ ] inbox paginates/filters server-side.
+- [x] import POP without duplicate on retry.
+- [x] config ≥3 steps with condition 1/2/3. (POP = c1/c2/c1 active; `DEMO3` draft template = c1/c2/c3 — added in 0005 so the seed shows all three without breaking the POP happy-path)
+- [x] user sees only their tasks. (inbox `WHERE assigned_user_id=$1 AND status='open'`)
+- [x] sequence 2 not opened until 1 complete.
+- [x] reject with reason works. (reason required at HTTP + engine; audit written)
+- [x] final PDF with signatures + legal text + verification code. (live: valid `%PDF`, contains Verification code + พ.ร.บ. 2544 + all 4 signer rows)
+- [x] admin can view full audit trail of one document. (live: 5 audit logs + 4 signature events; role-guarded)
+- [x] inbox paginates/filters server-side. (`LIMIT/OFFSET`, total in `meta`)
+
+### Known scope boundary (NOT a Phase 1 gap — see `docs/phase2-plan.md`)
+
+- condition_type=3 **external signer flow** (import-creates-external-task, token
+  invite, public sign page) is unwired. The engine handles external sign + token
+  expiry; the import path does not yet create external tasks. A guard now makes
+  the engine error rather than false-complete such a document. This is Phase 2,
+  Step 1–5.
