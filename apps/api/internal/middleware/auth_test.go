@@ -91,3 +91,70 @@ func TestRequireRole_Deny(t *testing.T) {
 		t.Errorf("got %d, want 403", w.Code)
 	}
 }
+
+// ── RequireAuthAllowQueryToken (PDF file routes) ─────────────────────────────
+//
+// These lock the audit-found behavior: the browser loads PDFs via <iframe>/<a>
+// where it cannot set an Authorization header, so GET file routes must accept a
+// ?token= query param. State-changing methods must NOT — a token in a URL leaks
+// into logs/history, so it may never authorize a write.
+
+func newQueryTokenRouter() *gin.Engine {
+	r := gin.New()
+	h := func(c *gin.Context) { c.Status(http.StatusOK) }
+	r.GET("/file", middleware.RequireAuthAllowQueryToken(testSecret), h)
+	r.POST("/file", middleware.RequireAuthAllowQueryToken(testSecret), h)
+	return r
+}
+
+func TestRequireAuthAllowQueryToken_GET_QueryToken(t *testing.T) {
+	tok := issueToken(t, "signer")
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/file?token="+tok, nil)
+	newQueryTokenRouter().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("GET with ?token= must pass: got %d, want 200", w.Code)
+	}
+}
+
+func TestRequireAuthAllowQueryToken_GET_HeaderStillWorks(t *testing.T) {
+	tok := issueToken(t, "signer")
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/file", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	newQueryTokenRouter().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("GET with header must still pass: got %d, want 200", w.Code)
+	}
+}
+
+func TestRequireAuthAllowQueryToken_GET_BadQueryToken(t *testing.T) {
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/file?token=garbage", nil)
+	newQueryTokenRouter().ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("bad query token must 401: got %d, want 401", w.Code)
+	}
+}
+
+func TestRequireAuthAllowQueryToken_GET_NoToken(t *testing.T) {
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/file", nil)
+	newQueryTokenRouter().ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("no token must 401: got %d, want 401", w.Code)
+	}
+}
+
+// SECURITY-critical: a POST must never be authorized by a query-string token,
+// even a valid one. This prevents state-changing requests whose token leaks via
+// access logs / browser history / Referer.
+func TestRequireAuthAllowQueryToken_POST_QueryTokenRejected(t *testing.T) {
+	tok := issueToken(t, "signer")
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/file?token="+tok, nil)
+	newQueryTokenRouter().ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("POST with ?token= must be rejected: got %d, want 401 (URL-token write is a leak vector)", w.Code)
+	}
+}

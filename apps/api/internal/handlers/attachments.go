@@ -62,6 +62,16 @@ func (h *AttachmentHandler) Upload(c *gin.Context) {
 		return
 	}
 
+	ok, err := canAccessDocument(ctx, h.pool, claims, docID)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
+		return
+	}
+	if !ok {
+		httpx.Error(c, http.StatusForbidden, "forbidden", "not authorized to access this document")
+		return
+	}
+
 	if err := c.Request.ParseMultipartForm(maxAttachmentBytes); err != nil {
 		httpx.Error(c, http.StatusBadRequest, "invalid_form", "could not parse form")
 		return
@@ -150,6 +160,17 @@ func (h *AttachmentHandler) List(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 
+	claims := middleware.ClaimsFrom(c)
+	ok, err := canAccessDocument(ctx, h.pool, claims, docID)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
+		return
+	}
+	if !ok {
+		httpx.Error(c, http.StatusForbidden, "forbidden", "not authorized to access this document")
+		return
+	}
+
 	rows, err := h.pool.Query(ctx, `
 		SELECT id, object_key, mime_type, size_bytes, uploaded_by_user_id, created_at::text
 		  FROM document_files
@@ -211,8 +232,9 @@ func (h *AttachmentHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	// Only uploader or admin may delete.
-	if !hasAdminRole(claims) && (uploaderID == nil || *uploaderID != claims.UserID) {
+	// Admin roles or the original uploader may delete.
+	if !hasRole(claims, "system_admin", "document_admin", "auditor", "workflow_admin") &&
+		(uploaderID == nil || *uploaderID != claims.UserID) {
 		httpx.Error(c, http.StatusForbidden, "forbidden", "cannot delete this attachment")
 		return
 	}

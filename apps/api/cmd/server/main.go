@@ -76,6 +76,9 @@ func main() {
 
 	// Documents (auth required)
 	requireAuth := middleware.RequireAuth(cfg.Auth.JWTSecret)
+	// File-view routes additionally accept ?token= (GET only) so the browser can
+	// load PDFs in <iframe>/<a> where an Authorization header cannot be set.
+	requireAuthFile := middleware.RequireAuthAllowQueryToken(cfg.Auth.JWTSecret)
 	docH := handlers.NewDocumentHandler(pool, store, wfEngine, logger)
 	attachH := handlers.NewAttachmentHandler(pool, store, logger)
 	auditH := handlers.NewAuditHandler(pool, wfEngine)
@@ -98,7 +101,6 @@ func main() {
 			docH.List)
 		docsG.POST("/import", docH.Import)
 		docsG.GET("/:id", docH.Get)
-		docsG.GET("/:id/file/original", docH.DownloadOriginal)
 		docsG.POST("/:id/attachments", attachH.Upload)
 		docsG.GET("/:id/attachments", attachH.List)
 		docsG.GET("/:id/audit-logs", auditH.AuditLogs)
@@ -140,8 +142,12 @@ func main() {
 		tasksG.POST("/:id/reject", taskH.Reject)
 	}
 
-	// Final PDF download (auth required; document must be completed)
-	docsG.GET("/:id/file/final", docH.DownloadFinal)
+	// PDF file routes — registered directly on v1 (not the docsG group) so they
+	// use requireAuthFile (header OR ?token= for GET) instead of the group's
+	// header-only requireAuth. Both handlers still enforce per-document access via
+	// canAccessDocument; DownloadFinal additionally requires status='completed'.
+	v1.GET("/documents/:id/file/original", requireAuthFile, docH.DownloadOriginal)
+	v1.GET("/documents/:id/file/final", requireAuthFile, docH.DownloadFinal)
 
 	addr := cfg.Server.Host + ":" + cfg.Server.Port
 	srv := &http.Server{

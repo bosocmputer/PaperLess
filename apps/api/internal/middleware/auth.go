@@ -14,14 +14,37 @@ const ClaimsKey = "auth_claims"
 
 // RequireAuth validates the Bearer JWT and stores the claims in the context.
 func RequireAuth(jwtSecret string) gin.HandlerFunc {
+	return authMiddleware(jwtSecret, false)
+}
+
+// RequireAuthAllowQueryToken behaves like RequireAuth but, for GET requests only,
+// also accepts the token via a ?token= query parameter when no Authorization
+// header is present. This is required for browser-driven file viewing where the
+// token cannot be set as a header (<iframe src>, <a href> download).
+//
+// SECURITY: query tokens can leak into access logs, browser history, and the
+// Referer header. It is therefore restricted to (a) GET only — never a
+// state-changing method — and (b) wired onto the read-only file routes only, not
+// the whole API. The Authorization header remains the preferred path and takes
+// precedence when both are present.
+func RequireAuthAllowQueryToken(jwtSecret string) gin.HandlerFunc {
+	return authMiddleware(jwtSecret, true)
+}
+
+func authMiddleware(jwtSecret string, allowQueryToken bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		var tokenStr string
 		header := c.GetHeader("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
+		if strings.HasPrefix(header, "Bearer ") {
+			tokenStr = strings.TrimPrefix(header, "Bearer ")
+		} else if allowQueryToken && c.Request.Method == http.MethodGet {
+			tokenStr = c.Query("token")
+		}
+		if tokenStr == "" {
 			httpx.Error(c, http.StatusUnauthorized, "unauthorized", "missing or invalid authorization header")
 			c.Abort()
 			return
 		}
-		tokenStr := strings.TrimPrefix(header, "Bearer ")
 		claims, err := auth.ParseAccessToken(jwtSecret, tokenStr)
 		if err != nil {
 			httpx.Error(c, http.StatusUnauthorized, "unauthorized", "invalid or expired token")

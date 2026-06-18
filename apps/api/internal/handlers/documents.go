@@ -12,11 +12,14 @@ import (
 	"strings"
 	"time"
 
+	"context"
+
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
+	"paperless-api/internal/auth"
 	"paperless-api/internal/httpx"
 	"paperless-api/internal/middleware"
 	"paperless-api/internal/pdf"
@@ -419,6 +422,27 @@ func (h *DocumentHandler) List(c *gin.Context) {
 	httpx.List(c, http.StatusOK, docs, httpx.Meta{Total: total, Page: page, Size: size})
 }
 
+// canAccessDocument returns true if the caller may read this document.
+// Admins/auditors/workflow_admins bypass; a plain signer is allowed only if
+// they have a signature_task assigned to them on the document.
+// Returns (false, nil) → caller must 403; (false, err) → caller must 500.
+func canAccessDocument(ctx context.Context, pool *pgxpool.Pool, claims *auth.Claims, docID int64) (bool, error) {
+	if hasRole(claims, "system_admin", "document_admin", "auditor", "workflow_admin") {
+		return true, nil
+	}
+	if claims == nil {
+		return false, nil
+	}
+	var hasTask bool
+	if err := pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM signature_tasks WHERE document_id=$1 AND assigned_user_id=$2)`,
+		docID, claims.UserID,
+	).Scan(&hasTask); err != nil {
+		return false, err
+	}
+	return hasTask, nil
+}
+
 // Get godoc: GET /documents/:id
 // Returns the document detail sufficient for both the signer task view and the
 // admin detail view. idempotency_key is intentionally excluded (internal dedup
@@ -461,30 +485,15 @@ func (h *DocumentHandler) Get(c *gin.Context) {
 		return
 	}
 
-	// Access scoping (mirrors GetTask): admin/auditor/workflow roles may read any
-	// document; a plain signer may read a document only if they have a signature
-	// task assigned to them on it. This prevents a signer from harvesting arbitrary
-	// documents' details (incl. amount) by iterating ids. The legitimate signer UI
-	// only ever opens documents reached from the user's own inbox, so this does not
-	// break that flow.
 	claims := middleware.ClaimsFrom(c)
-	if !hasRole(claims, "system_admin", "document_admin", "auditor", "workflow_admin") {
-		if claims == nil {
-			httpx.Error(c, http.StatusForbidden, "forbidden", "not authorized to view this document")
-			return
-		}
-		var hasTask bool
-		if err := h.pool.QueryRow(ctx,
-			`SELECT EXISTS(SELECT 1 FROM signature_tasks WHERE document_id=$1 AND assigned_user_id=$2)`,
-			docID, claims.UserID,
-		).Scan(&hasTask); err != nil {
-			httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
-			return
-		}
-		if !hasTask {
-			httpx.Error(c, http.StatusForbidden, "forbidden", "not authorized to view this document")
-			return
-		}
+	ok, err2 := canAccessDocument(ctx, h.pool, claims, docID)
+	if err2 != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
+		return
+	}
+	if !ok {
+		httpx.Error(c, http.StatusForbidden, "forbidden", "not authorized to view this document")
+		return
 	}
 
 	httpx.OK(c, http.StatusOK, doc)
@@ -498,6 +507,17 @@ func (h *DocumentHandler) DownloadOriginal(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
+
+	claims := middleware.ClaimsFrom(c)
+	allowed, err := canAccessDocument(ctx, h.pool, claims, docID)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
+		return
+	}
+	if !allowed {
+		httpx.Error(c, http.StatusForbidden, "forbidden", "not authorized to view this document")
+		return
+	}
 
 	var objectKey string
 	err = h.pool.QueryRow(ctx,
@@ -534,6 +554,17 @@ func (h *DocumentHandler) DownloadFinal(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
+
+	claims := middleware.ClaimsFrom(c)
+	allowed, err := canAccessDocument(ctx, h.pool, claims, docID)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
+		return
+	}
+	if !allowed {
+		httpx.Error(c, http.StatusForbidden, "forbidden", "not authorized to view this document")
+		return
+	}
 
 	var docStatus string
 	if err := h.pool.QueryRow(ctx, `SELECT status FROM documents WHERE id=$1`, docID).Scan(&docStatus); err != nil {

@@ -130,6 +130,17 @@ func (h *AuditHandler) WorkflowStatus(c *gin.Context) {
 	}
 	ctx := c.Request.Context()
 
+	claims := middleware.ClaimsFrom(c)
+	ok, err := canAccessDocument(ctx, h.pool, claims, docID)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
+		return
+	}
+	if !ok {
+		httpx.Error(c, http.StatusForbidden, "forbidden", "not authorized to view this document")
+		return
+	}
+
 	progress, err := h.engine.StepProgressForDocument(ctx, docID)
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
