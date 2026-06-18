@@ -1,0 +1,114 @@
+# PaperLess production stack for the on-prem server (192.168.2.109).
+#
+# Built from source on the server (no registry) — `docker compose -f
+# docker-compose.prod.yml up -d --build`. Ports are chosen to avoid the ~30
+# containers already running on this host (postgres 5432/5434/5436/5438/5440/5448
+# are taken; web 3000–3060 mostly taken; api 8080/8200 — 8080 free, 8200 is
+# sml-api-bybos).
+#
+# Secrets come from deploy/.env (untracked). See deploy/.env.example.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: paperless-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-paperless}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in deploy/.env}
+    ports:
+      - "${POSTGRES_PORT:-54320}:5432"
+    volumes:
+      - paperless_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-paperless}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 512m
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: paperless-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set in deploy/.env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set in deploy/.env}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - paperless_miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 512m
+    restart: unless-stopped
+
+  # One-shot migration runner — applies migrations then exits.
+  migrate:
+    build:
+      context: ../apps/api
+    container_name: paperless-migrate
+    entrypoint: ["/usr/local/bin/migrate", "up"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-paperless}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: ../apps/api
+    container_name: paperless-api
+    environment:
+      APP_PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-paperless}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?set in deploy/.env}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET:-paperless}
+      MINIO_USE_SSL: "false"
+      DB_STATEMENT_TIMEOUT_MS: ${DB_STATEMENT_TIMEOUT_MS:-5000}
+      # SML stays disabled for the pilot — point it at sml-api-bybos when Q1–Q4 land.
+      SML_API_BASE_URL: ${SML_API_BASE_URL:-http://sml-api-bybos-sml-api-1:8200}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    mem_limit: 256m
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../apps/web
+    container_name: paperless-web
+    environment:
+      # Server-side rewrites() proxy /api/v1 → api container (no browser CORS).
+      API_INTERNAL_URL: http://api:8080
+      NODE_ENV: production
+    ports:
+      - "${WEB_PORT:-3070}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 256m
+    restart: unless-stopped
+
+volumes:
+  paperless_pgdata:
+  paperless_miniodata:

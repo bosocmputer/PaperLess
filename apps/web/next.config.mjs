@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Standalone server bundle for a small Docker runtime layer (apps/web/Dockerfile).
+  output: "standalone",
+
   // Mobile-first: prevent layout zoom on input focus in iOS Safari.
   experimental: {},
 
