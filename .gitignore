@@ -5,6 +5,10 @@
 *.pem
 *.key
 
+# Credentials reference (real passwords — never commit)
+CREDENTIALS.md
+**/CREDENTIALS.md
+
 # Graphify (local-only context map)
 graphify-out/
 
