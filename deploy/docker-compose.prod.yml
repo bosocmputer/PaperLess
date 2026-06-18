@@ -96,10 +96,12 @@ services:
   web:
     build:
       context: ../apps/web
+      args:
+        # Baked into the standalone bundle at build time (rewrites() is compiled
+        # in; runtime env alone does not reach next.config in standalone output).
+        API_INTERNAL_URL: http://api:8080
     container_name: paperless-web
     environment:
-      # Server-side rewrites() proxy /api/v1 → api container (no browser CORS).
-      API_INTERNAL_URL: http://api:8080
       NODE_ENV: production
     ports:
       - "${WEB_PORT:-3070}:3000"

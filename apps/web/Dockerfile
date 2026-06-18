@@ -9,7 +9,11 @@ FROM node:20-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# API_INTERNAL_URL is read at runtime by the rewrites() proxy, not baked in.
+# Next.js evaluates rewrites() at BUILD time and compiles the destination into
+# the standalone bundle (next.config.mjs is NOT shipped in the standalone output),
+# so API_INTERNAL_URL must be a build ARG, not just a runtime env.
+ARG API_INTERNAL_URL=http://api:8080
+ENV API_INTERNAL_URL=${API_INTERNAL_URL}
 RUN npm run build
 
 FROM node:20-alpine AS runner
