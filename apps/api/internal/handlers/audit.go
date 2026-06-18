@@ -55,6 +55,7 @@ func (h *AuditHandler) AuditLogs(c *gin.Context) {
 		  FROM audit_logs
 		 WHERE entity_type='document' AND entity_id=$1
 		 ORDER BY created_at
+		 LIMIT 500
 	`, strconv.FormatInt(docID, 10))
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
@@ -89,6 +90,7 @@ func (h *AuditHandler) AuditLogs(c *gin.Context) {
 		  FROM signature_events
 		 WHERE document_id=$1
 		 ORDER BY signed_at
+		 LIMIT 500
 	`, docID)
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "signature events fetch failed")

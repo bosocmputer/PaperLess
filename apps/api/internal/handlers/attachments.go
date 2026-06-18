@@ -155,6 +155,7 @@ func (h *AttachmentHandler) List(c *gin.Context) {
 		  FROM document_files
 		 WHERE document_id=$1 AND file_type='attachment'
 		 ORDER BY created_at
+		 LIMIT 200
 	`, docID)
 	if err != nil {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "list failed")

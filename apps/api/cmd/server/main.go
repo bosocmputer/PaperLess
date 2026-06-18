@@ -57,7 +57,7 @@ func main() {
 	r.Use(middleware.Logger(logger))
 
 	// Health — no auth.
-	h := handlers.NewHealthHandler(pool)
+	h := handlers.NewHealthHandler(pool, store)
 	r.GET("/health", h.Live)
 	r.GET("/health/ready", h.Ready)
 
@@ -79,8 +79,23 @@ func main() {
 	docH := handlers.NewDocumentHandler(pool, store, wfEngine, logger)
 	attachH := handlers.NewAttachmentHandler(pool, store, logger)
 	auditH := handlers.NewAuditHandler(pool, wfEngine)
+	extSignerH := handlers.NewExternalSignerHandler(pool, logger)
+	extSignH := handlers.NewExternalSignHandler(pool, store, wfEngine, logger)
+
+	// Public external-sign endpoints — NO JWT. Token carried in X-Signer-Token header.
+	// These are the ONLY unauthenticated routes; every other route stays behind requireAuth.
+	extG := v1.Group("/external")
+	{
+		extG.GET("/document", extSignH.DocumentView)
+		extG.GET("/document/file/original", extSignH.DownloadOriginalPublic)
+		extG.POST("/sign", extSignH.Sign)
+	}
+
 	docsG := v1.Group("/documents", requireAuth)
 	{
+		docsG.GET("",
+			middleware.RequireRole("document_admin", "system_admin", "auditor"),
+			docH.List)
 		docsG.POST("/import", docH.Import)
 		docsG.GET("/:id", docH.Get)
 		docsG.GET("/:id/file/original", docH.DownloadOriginal)
@@ -88,6 +103,28 @@ func main() {
 		docsG.GET("/:id/attachments", attachH.List)
 		docsG.GET("/:id/audit-logs", auditH.AuditLogs)
 		docsG.GET("/:id/workflow-status", auditH.WorkflowStatus)
+		docsG.POST("/:id/external-signers",
+			middleware.RequireRole("document_admin", "system_admin"), extSignerH.Invite)
+		docsG.GET("/:id/external-signers",
+			middleware.RequireRole("document_admin", "system_admin", "auditor"), extSignerH.List)
+		docsG.POST("/:id/external-signers/:signerId/cancel",
+			middleware.RequireRole("document_admin", "system_admin"), extSignerH.Cancel)
+		docsG.POST("/:id/external-signers/:signerId/resend",
+			middleware.RequireRole("document_admin", "system_admin"), extSignerH.Resend)
+		docsG.POST("/:id/finalize",
+			middleware.RequireRole("document_admin", "system_admin"), docH.Finalize)
+	}
+
+	// Workflow templates (auth required)
+	wfTmplH := handlers.NewWorkflowTemplateHandler(pool, logger)
+	wfTmplG := v1.Group("/workflow-templates", requireAuth,
+		middleware.RequireRole("workflow_admin", "system_admin"))
+	{
+		wfTmplG.GET("", wfTmplH.ListTemplates)
+		wfTmplG.GET("/:id", wfTmplH.GetTemplate)
+		wfTmplG.POST("/:id/clone", wfTmplH.Clone)
+		wfTmplG.POST("/:id/publish", wfTmplH.Publish)
+		wfTmplG.POST("/:id/deactivate", wfTmplH.Deactivate)
 	}
 
 	// Standalone attachment delete (by file id, not doc id)

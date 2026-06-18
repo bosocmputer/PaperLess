@@ -184,37 +184,50 @@ in the header, not the path. So the endpoints are:
 
 ## Audit Checklist (Opus runs this against the delivered code — real DB, not skipped)
 
+**Status: AUDITED — PASS (2026-06-17, Opus).** Verified against a real throwaway
+Postgres (:54331) with real migrations and the full suite run for real (no
+skips), plus the external flow driven live via httptest. The audit added the
+regression coverage the delivery was missing for the highest-risk surface
+(`internal/workflow/external_sign_test.go`, `internal/handlers/external_sign_http_test.go`).
+Two non-blocker findings, see `docs/current-state.md`. Items needing real
+hardware (device QA) remain open and cannot be automated.
+
 ### Build & quality gates
-- [ ] `go build ./...`, `go vet ./...` clean.
-- [ ] `go test ./...` green **with `PAPERLESS_TEST_DB` set** (paste output; confirm external tests ran, not skipped).
-- [ ] `npm run build` clean.
-- [ ] Migrations up→down→up clean on a throwaway DB; new migration only (0001–0005 untouched).
+
+- [x] `go build ./...`, `go vet ./...` clean.
+- [x] `go test ./...` green **with `PAPERLESS_TEST_DB` set** (8 workflow + 3 handler external tests RAN, not skipped).
+- [x] `npm run build` clean (8 routes incl. `/external/[token]`).
+- [x] Migrations up→down→up clean on a pristine DB (0 tables after down). No new migration needed — `external_signers` already existed in 0001; 0001–0005 untouched.
 
 ### External signer — security (highest risk)
-- [ ] Token stored as SHA-256 hash only; raw token returned once; never in logs/response bodies (grep).
-- [ ] Token carried in `X-Signer-Token` header, NOT in the API URL path/query (won't leak to access logs/Referer). Page route `/external/[token]` is the only place the raw token sits in a URL.
-- [ ] Public original-PDF endpoint streams only after the token check; the auth-only `/documents/:id/file/original` is NOT reused and no public doc-id route exists.
-- [ ] Public sign endpoints carry NO JWT requirement; all other routes still guarded.
-- [ ] Valid token signs exactly once; reuse → rejected; expired → rejected; garbage/oversized token → rejected with a clean error (no 500/stack trace).
-- [ ] `request_id` idempotency on external sign → one signature_event.
-- [ ] Token validation + state re-checked from DB inside the tx; signer row-locked.
-- [ ] Rate limiting present on public routes (per-IP at minimum); triggers under repeated bad tokens.
-- [ ] OTP gate (if flag on) actually blocks signing until verified; OTP never returned in a response.
+
+- [x] Token stored as SHA-256 hash only (UNIQUE index; no raw-token column); raw token returned once; never in logs/response bodies (grep + live).
+- [x] Token carried in `X-Signer-Token` header, NOT in the API URL path/query (grep clean). Page route `/external/[token]` is the only place the raw token sits in a URL.
+- [x] Public original-PDF endpoint (`DownloadOriginalPublic`) streams only after the token check; the auth-only route is NOT reused; no public doc-id route exists.
+- [x] Public sign endpoints carry NO JWT; all other routes still behind RequireAuth/RequireRole.
+- [x] Valid token signs once; reuse → 410 used; expired → rejected (`TestExternalToken_Expired`); garbage/oversized → clean 401 (no 500/stack trace) — verified live.
+- [x] `request_id` idempotency on external sign → one signature_event (verified live: reuse stays at 1 event).
+- [x] Token validation + state re-checked from DB inside the tx; signer row-locked (`FOR UPDATE OF es` in `ExternalSign`).
+- [x] Rate limiting present (per-IP, 20/min); triggers under repeated bad tokens (live: fired at attempt 21).
+- [x] OTP gate flag-OFF for pilot (per plan); no OTP ever returned in a response (no OTP issuance endpoint present).
 
 ### External signer — correctness
-- [ ] Import no longer false-completes a doc with an external step (Phase 1 bug stays fixed); non-external zero-task sequence still errors.
-- [ ] External task created with `external_signer_id` set, `assigned_user_id` NULL.
-- [ ] Completing a doc via external sign advances the sequence and completes correctly.
-- [ ] Evidence page / final PDF shows the external signer with `external` type + verification method.
+
+- [x] Import no longer false-completes a doc with an external step (`TestImport_ExternalStep_CreatesWaitingTask`); non-external zero-task sequence still errors.
+- [x] External task created `waiting` (NULL signer ids) at import; invite sets `external_signer_id`, `assigned_user_id` stays NULL, flips to `open`.
+- [x] Completing a doc via external sign advances the sequence and completes correctly (verified live, single-external-step doc → `completed`).
+- [x] Evidence page / final PDF shows the external signer with `external` type (`writeExternalSignatureEvent` + evidence Type column).
 
 ### Frontend
-- [ ] `/external/[token]` signable end-to-end on a real phone from a link alone.
-- [ ] All error states reachable (4 external + 13 internal).
-- [ ] No request/response contract drift vs `lib/api.ts` (re-verify after StepProgress fix).
-- [ ] Manual QA recorded for iOS Safari + Android Chrome (no scroll-while-signing).
+
+- [~] `/external/[token]` builds and is wired for end-to-end signing; **real-phone run is manual QA (open)**.
+- [x] External error states wired in page + ErrorState (expired/used/invalid/network/pdf). `external_signer_info_missing` defined but only reachable from the admin invite flow.
+- [x] No contract drift vs `lib/api.ts` (`ExternalDocView` matches handler payload; StepProgress snake_case confirmed).
+- [ ] Manual QA recorded for iOS Safari + Android Chrome (no scroll-while-signing) — **OPEN, needs real devices**.
 
 ### Invariants (carried)
-- [ ] No applied migration edited; no in-use template mutated.
-- [ ] SML only behind `SmlDocumentGateway` (mock); no direct SML calls.
-- [ ] No secrets committed; `.env` untracked.
-- [ ] `completed` doc downloadable independent of SML sync.
+
+- [x] No applied migration edited; no in-use template mutated (no new migration; no `UPDATE workflow_templates`).
+- [x] SML only behind `SmlDocumentGateway` (mock); no direct SML calls in the external path.
+- [x] No secrets committed; `.env` untracked.
+- [x] `completed` doc downloadable independent of SML sync (external path doesn't touch sync_status).

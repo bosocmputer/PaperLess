@@ -45,7 +45,7 @@ func FinalizeDocument(ctx context.Context, pool *pgxpool.Pool, store *storage.Cl
 	// Load signers from signature_events.
 	rows, err := pool.Query(ctx, `
 		SELECT se.signer_name, COALESCE(r.code,'') AS role,
-		       se.action, se.signed_at,
+		       se.signer_type, se.action, se.signed_at,
 		       COALESCE(host(se.ip_address),'') AS ip,
 		       COALESCE(se.signature_image_hash,'') AS sig_hash
 		  FROM signature_events se
@@ -65,7 +65,7 @@ func FinalizeDocument(ctx context.Context, pool *pgxpool.Pool, store *storage.Cl
 	var signers []SignerRecord
 	for rows.Next() {
 		var s SignerRecord
-		if err := rows.Scan(&s.Name, &s.Role, &s.Action, &s.SignedAt, &s.IPAddress, &s.SignatureHash); err != nil {
+		if err := rows.Scan(&s.Name, &s.Role, &s.SignerType, &s.Action, &s.SignedAt, &s.IPAddress, &s.SignatureHash); err != nil {
 			return "", fmt.Errorf("scan signer: %w", err)
 		}
 		signers = append(signers, s)

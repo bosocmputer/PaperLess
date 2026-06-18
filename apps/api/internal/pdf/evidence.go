@@ -17,11 +17,12 @@ import (
 
 // SignerRecord is one signer's contribution to the evidence page.
 type SignerRecord struct {
-	Name       string
-	Role       string
-	Action     string // "sign" | "skip"
-	SignedAt   time.Time
-	IPAddress  string
+	Name          string
+	Role          string
+	SignerType    string // "internal" | "external"
+	Action        string // "sign" | "skip"
+	SignedAt      time.Time
+	IPAddress     string
 	SignatureHash string // sha-256 of the signature image bytes (NOT the image itself)
 }
 
@@ -91,11 +92,12 @@ func BuildEvidencePage(input EvidenceInput) ([]byte, error) {
 
 	pdf.SetFont("Helvetica", "B", 9)
 	pdf.SetFillColor(230, 230, 230)
-	pdf.CellFormat(55, 7, "Name / Role", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(50, 7, "Name / Role", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(20, 7, "Type", "1", 0, "C", true, 0, "")
 	pdf.CellFormat(20, 7, "Action", "1", 0, "C", true, 0, "")
-	pdf.CellFormat(50, 7, "Signed At (UTC)", "1", 0, "C", true, 0, "")
+	pdf.CellFormat(45, 7, "Signed At (UTC)", "1", 0, "C", true, 0, "")
 	pdf.CellFormat(30, 7, "IP Address", "1", 0, "C", true, 0, "")
-	pdf.CellFormat(0, 7, "Signature Hash (truncated)", "1", 1, "C", true, 0, "")
+	pdf.CellFormat(0, 7, "Sig Hash", "1", 1, "C", true, 0, "")
 
 	pdf.SetFont("Helvetica", "", 8)
 	pdf.SetFillColor(255, 255, 255)
@@ -105,6 +107,10 @@ func BuildEvidencePage(input EvidenceInput) ([]byte, error) {
 			pdf.SetFillColor(245, 245, 245)
 		} else {
 			pdf.SetFillColor(255, 255, 255)
+		}
+		signerType := s.SignerType
+		if signerType == "" {
+			signerType = "internal"
 		}
 		nameRole := fmt.Sprintf("%s\n(%s)", s.Name, s.Role)
 		ts := ""
@@ -121,13 +127,14 @@ func BuildEvidencePage(input EvidenceInput) ([]byte, error) {
 		// Use MultiCell for the name/role column, single Cell for the rest.
 		x := pdf.GetX()
 		y := pdf.GetY()
-		pdf.MultiCell(55, 5, nameRole, "1", "L", fill)
+		pdf.MultiCell(50, 5, nameRole, "1", "L", fill)
 		newY := pdf.GetY()
 		rowH := newY - y
 
-		pdf.SetXY(x+55, y)
+		pdf.SetXY(x+50, y)
+		pdf.CellFormat(20, rowH, signerType, "1", 0, "C", fill, 0, "")
 		pdf.CellFormat(20, rowH, s.Action, "1", 0, "C", fill, 0, "")
-		pdf.CellFormat(50, rowH, ts, "1", 0, "C", fill, 0, "")
+		pdf.CellFormat(45, rowH, ts, "1", 0, "C", fill, 0, "")
 		pdf.CellFormat(30, rowH, s.IPAddress, "1", 0, "C", fill, 0, "")
 		pdf.CellFormat(0, rowH, sigHashShort, "1", 1, "C", fill, 0, "")
 	}

@@ -13,7 +13,8 @@ Use docs as on-demand context. Keep `AGENTS.md` short and point here for details
 - `deploy-instances.md` — environments, ports, deploy commands
 - `testing.md` — test commands and acceptance criteria
 - `phase1-plan.md` — Phase 1 build plan + audit checklist (done, audited PASS)
-- `phase2-plan.md` — Phase 2 build plan: external signer flow + frontend hardening (next)
+- `phase2-plan.md` — Phase 2 build plan: external signer flow + frontend hardening (done, audited PASS)
+- `phase3-pilot-readiness.md` — Pilot track: prod hardening (data integrity, perf, ops) + admin invite UI (next; no SML dependency)
 - `sml-questions.md` — fill-in form for the SML team (gates Phase 3)
 - `requirements/` — original customer Excel spec + design docs
 - `adr/` — architecture decisions

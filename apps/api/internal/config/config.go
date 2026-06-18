@@ -20,9 +20,10 @@ type Config struct {
 		Port string
 	}
 	DB struct {
-		URL      string // full postgres DSN to the PaperLess database
-		MaxConns int32
-		MinConns int32
+		URL              string // full postgres DSN to the PaperLess database
+		MaxConns         int32
+		MinConns         int32
+		StatementTimeout int // milliseconds; 0 = no timeout (default: 5000)
 	}
 	Auth struct {
 		JWTSecret string
@@ -51,6 +52,7 @@ func Load() *Config {
 	c.DB.URL = getEnv("DATABASE_URL", "postgres://postgres:paperless@localhost:5432/paperless?sslmode=disable")
 	c.DB.MaxConns = int32(getEnvInt("DB_MAX_CONNS", 10))
 	c.DB.MinConns = int32(getEnvInt("DB_MIN_CONNS", 2))
+	c.DB.StatementTimeout = getEnvInt("DB_STATEMENT_TIMEOUT_MS", 5000)
 
 	c.Auth.JWTSecret = getEnv("JWT_SECRET", "")
 

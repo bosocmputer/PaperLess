@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -18,6 +19,7 @@ import (
 
 	"paperless-api/internal/httpx"
 	"paperless-api/internal/middleware"
+	"paperless-api/internal/pdf"
 	"paperless-api/internal/storage"
 	"paperless-api/internal/workflow"
 )
@@ -55,11 +57,34 @@ func (h *DocumentHandler) Import(c *gin.Context) {
 		httpx.Error(c, http.StatusBadRequest, "invalid_request", "doc_format_code and doc_no are required")
 		return
 	}
+	if len(docFormatCode) > 50 {
+		httpx.Error(c, http.StatusBadRequest, "invalid_request", "doc_format_code must be 50 characters or fewer")
+		return
+	}
+	if len(docNo) > 100 {
+		httpx.Error(c, http.StatusBadRequest, "invalid_request", "doc_no must be 100 characters or fewer")
+		return
+	}
 
 	revision := 0
 	if r := c.PostForm("revision"); r != "" {
 		if v, err := strconv.Atoi(r); err == nil {
 			revision = v
+		}
+	}
+
+	// Validate optional fields before any DB work so parse failures surface as
+	// clean 4xx rather than a Postgres cast error (which would be a 500).
+	if ds := strings.TrimSpace(c.PostForm("doc_date")); ds != "" {
+		if _, err := parseDate(ds); err != nil {
+			httpx.Error(c, http.StatusBadRequest, "invalid_request", "doc_date must be in YYYY-MM-DD format")
+			return
+		}
+	}
+	if as := strings.TrimSpace(c.PostForm("amount")); as != "" {
+		if err := validateDecimal(as); err != nil {
+			httpx.Error(c, http.StatusBadRequest, "invalid_request", "amount must be a valid decimal number")
+			return
 		}
 	}
 
@@ -250,7 +275,155 @@ func (h *DocumentHandler) Import(c *gin.Context) {
 	})
 }
 
+// validDocumentStatuses is the set of allowed values for the documents.status CHECK.
+// Source: 0001_init.up.sql — CHECK (status IN ('imported','pending','rejected','completed','cancelled'))
+var validDocumentStatuses = map[string]struct{}{
+	"imported": {}, "pending": {}, "rejected": {}, "completed": {}, "cancelled": {},
+}
+
+// validSyncStatuses is the set of allowed values for documents.sync_status CHECK.
+// Source: 0001_init.up.sql — CHECK (sync_status IN ('not_required','sync_pending','synced','sync_failed','sync_unknown'))
+var validSyncStatuses = map[string]struct{}{
+	"not_required": {}, "sync_pending": {}, "synced": {}, "sync_failed": {}, "sync_unknown": {},
+}
+
+// List godoc: GET /documents
+// Paginated list of all documents. Supports filtering by status, doc_format_code,
+// sync_status and substring search on doc_no (q). Admin/auditor only.
+func (h *DocumentHandler) List(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if size < 1 || size > 100 {
+		size = 20
+	}
+	offset := (page - 1) * size
+
+	// Validate optional enum filters before hitting the DB.
+	statusFilter := c.Query("status")
+	if statusFilter != "" {
+		if _, ok := validDocumentStatuses[statusFilter]; !ok {
+			httpx.Error(c, http.StatusBadRequest, "invalid_request",
+				fmt.Sprintf("status %q is not a valid value; must be one of: imported,pending,rejected,completed,cancelled", statusFilter))
+			return
+		}
+	}
+	syncStatusFilter := c.Query("sync_status")
+	if syncStatusFilter != "" {
+		if _, ok := validSyncStatuses[syncStatusFilter]; !ok {
+			httpx.Error(c, http.StatusBadRequest, "invalid_request",
+				fmt.Sprintf("sync_status %q is not a valid value; must be one of: not_required,sync_pending,synced,sync_failed,sync_unknown", syncStatusFilter))
+			return
+		}
+	}
+	docFormatFilter := c.Query("doc_format_code")
+	qFilter := c.Query("q")
+
+	ctx := c.Request.Context()
+
+	// Build WHERE clause dynamically to hit ix_documents_search.
+	// Positional args: we accumulate args alongside the WHERE fragments.
+	args := []any{}
+	where := []string{}
+	argN := 1
+
+	if statusFilter != "" {
+		where = append(where, fmt.Sprintf("status=$%d", argN))
+		args = append(args, statusFilter)
+		argN++
+	}
+	if docFormatFilter != "" {
+		where = append(where, fmt.Sprintf("doc_format_code=$%d", argN))
+		args = append(args, docFormatFilter)
+		argN++
+	}
+	if syncStatusFilter != "" {
+		where = append(where, fmt.Sprintf("sync_status=$%d", argN))
+		args = append(args, syncStatusFilter)
+		argN++
+	}
+	if qFilter != "" {
+		// q is a literal substring match on doc_no. Escape LIKE metacharacters
+		// (\ % _) so a doc_no like "PO_2567_001" is matched literally rather than
+		// treating "_" / "%" as wildcards. ESCAPE '\' makes the backslash the
+		// escape char in the pattern.
+		where = append(where, fmt.Sprintf(`doc_no ILIKE $%d ESCAPE '\'`, argN))
+		args = append(args, "%"+escapeLike(qFilter)+"%")
+		argN++
+	}
+
+	whereClause := ""
+	if len(where) > 0 {
+		whereClause = "WHERE " + strings.Join(where, " AND ")
+	}
+
+	var total int
+	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM documents %s", whereClause)
+	if err := h.pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
+		h.log.Error("list documents: count", zap.Error(err))
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "list failed")
+		return
+	}
+
+	listArgs := append(args, size, offset)
+	listSQL := fmt.Sprintf(`
+		SELECT id, doc_format_code, doc_no, revision, status, sync_status,
+		       amount::text, doc_date::text, workflow_version, created_at::text
+		  FROM documents
+		  %s
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT $%d OFFSET $%d
+	`, whereClause, argN, argN+1)
+
+	rows, err := h.pool.Query(ctx, listSQL, listArgs...)
+	if err != nil {
+		h.log.Error("list documents: query", zap.Error(err))
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "list failed")
+		return
+	}
+	defer rows.Close()
+
+	type docRow struct {
+		ID              string  `json:"id"`
+		DocFormatCode   string  `json:"doc_format_code"`
+		DocNo           string  `json:"doc_no"`
+		Revision        int     `json:"revision"`
+		Status          string  `json:"status"`
+		SyncStatus      *string `json:"sync_status"`
+		Amount          *string `json:"amount"`
+		DocDate         *string `json:"doc_date"`
+		WorkflowVersion int     `json:"workflow_version"`
+		CreatedAt       string  `json:"created_at"`
+	}
+	var docs []docRow
+	for rows.Next() {
+		var d docRow
+		var rawID int64
+		if err := rows.Scan(
+			&rawID, &d.DocFormatCode, &d.DocNo, &d.Revision, &d.Status, &d.SyncStatus,
+			&d.Amount, &d.DocDate, &d.WorkflowVersion, &d.CreatedAt,
+		); err != nil {
+			h.log.Error("list documents: scan", zap.Error(err))
+			httpx.Error(c, http.StatusInternalServerError, "internal_error", "list failed")
+			return
+		}
+		d.ID = strconv.FormatInt(rawID, 10)
+		docs = append(docs, d)
+	}
+	if docs == nil {
+		docs = []docRow{}
+	}
+
+	httpx.List(c, http.StatusOK, docs, httpx.Meta{Total: total, Page: page, Size: size})
+}
+
 // Get godoc: GET /documents/:id
+// Returns the document detail sufficient for both the signer task view and the
+// admin detail view. idempotency_key is intentionally excluded (internal dedup
+// key, not meaningful to callers). amount and doc_date are NULLable — scanned as
+// *string so a NULL doesn't blow up the scan.
 func (h *DocumentHandler) Get(c *gin.Context) {
 	docID, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
@@ -260,18 +433,25 @@ func (h *DocumentHandler) Get(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	var doc struct {
-		ID             int64  `json:"id"`
-		DocFormatCode  string `json:"doc_format_code"`
-		DocNo          string `json:"doc_no"`
-		Revision       int    `json:"revision"`
-		Status         string `json:"status"`
-		SyncStatus     *string `json:"sync_status"`
-		IdempotencyKey string  `json:"idempotency_key"`
+		ID              int64   `json:"id"`
+		DocFormatCode   string  `json:"doc_format_code"`
+		DocNo           string  `json:"doc_no"`
+		Revision        int     `json:"revision"`
+		Status          string  `json:"status"`
+		SyncStatus      *string `json:"sync_status"`
+		Amount          *string `json:"amount"`
+		DocDate         *string `json:"doc_date"`
+		WorkflowVersion int     `json:"workflow_version"`
+		CreatedAt       string  `json:"created_at"`
 	}
 	err = h.pool.QueryRow(ctx,
-		`SELECT id, doc_format_code, doc_no, revision, status, sync_status, idempotency_key
+		`SELECT id, doc_format_code, doc_no, revision, status, sync_status,
+		        amount::text, doc_date::text, workflow_version, created_at::text
 		   FROM documents WHERE id=$1`, docID,
-	).Scan(&doc.ID, &doc.DocFormatCode, &doc.DocNo, &doc.Revision, &doc.Status, &doc.SyncStatus, &doc.IdempotencyKey)
+	).Scan(
+		&doc.ID, &doc.DocFormatCode, &doc.DocNo, &doc.Revision, &doc.Status, &doc.SyncStatus,
+		&doc.Amount, &doc.DocDate, &doc.WorkflowVersion, &doc.CreatedAt,
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "not_found", "document not found")
 		return
@@ -280,6 +460,33 @@ func (h *DocumentHandler) Get(c *gin.Context) {
 		httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
 		return
 	}
+
+	// Access scoping (mirrors GetTask): admin/auditor/workflow roles may read any
+	// document; a plain signer may read a document only if they have a signature
+	// task assigned to them on it. This prevents a signer from harvesting arbitrary
+	// documents' details (incl. amount) by iterating ids. The legitimate signer UI
+	// only ever opens documents reached from the user's own inbox, so this does not
+	// break that flow.
+	claims := middleware.ClaimsFrom(c)
+	if !hasRole(claims, "system_admin", "document_admin", "auditor", "workflow_admin") {
+		if claims == nil {
+			httpx.Error(c, http.StatusForbidden, "forbidden", "not authorized to view this document")
+			return
+		}
+		var hasTask bool
+		if err := h.pool.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM signature_tasks WHERE document_id=$1 AND assigned_user_id=$2)`,
+			docID, claims.UserID,
+		).Scan(&hasTask); err != nil {
+			httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
+			return
+		}
+		if !hasTask {
+			httpx.Error(c, http.StatusForbidden, "forbidden", "not authorized to view this document")
+			return
+		}
+	}
+
 	httpx.OK(c, http.StatusOK, doc)
 }
 
@@ -347,7 +554,10 @@ func (h *DocumentHandler) DownloadFinal(c *gin.Context) {
 		`SELECT object_key FROM document_files WHERE document_id=$1 AND file_type='final_pdf' LIMIT 1`, docID,
 	).Scan(&objectKey)
 	if errors.Is(err, pgx.ErrNoRows) {
-		httpx.Error(c, http.StatusNotFound, "not_found", "final PDF not yet generated")
+		// Doc is completed but the final PDF was never written (storage was down
+		// at completion time). Return a stable code so the UI can offer a retry
+		// instead of showing a generic 404.
+		httpx.Error(c, http.StatusConflict, "pdf_generation_pending", "final PDF not yet generated — retry via POST /finalize")
 		return
 	}
 	if err != nil {
@@ -368,10 +578,101 @@ func (h *DocumentHandler) DownloadFinal(c *gin.Context) {
 	})
 }
 
+// Finalize godoc: POST /documents/:id/finalize
+// Idempotent: re-runs FinalizeDocument. No-ops if the final PDF already exists.
+// Intended as the manual recovery path when storage was down at completion time.
+// Requires: document_admin or system_admin role.
+func (h *DocumentHandler) Finalize(c *gin.Context) {
+	docID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.Error(c, http.StatusBadRequest, "invalid_id", "document id must be an integer")
+		return
+	}
+	ctx := c.Request.Context()
+
+	var docStatus string
+	if err := h.pool.QueryRow(ctx, `SELECT status FROM documents WHERE id=$1`, docID).Scan(&docStatus); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(c, http.StatusNotFound, "not_found", "document not found")
+			return
+		}
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
+		return
+	}
+	if docStatus != "completed" {
+		httpx.Error(c, http.StatusConflict, "document_not_completed", "finalize is only available once the document is completed")
+		return
+	}
+
+	objectKey, err := pdf.FinalizeDocument(ctx, h.pool, h.store, docID)
+	if err != nil {
+		h.log.Error("finalize document", zap.Error(err), zap.Int64("doc_id", docID))
+		httpx.Error(c, http.StatusInternalServerError, "pdf_generation_failed", "PDF generation failed")
+		return
+	}
+
+	httpx.OK(c, http.StatusOK, gin.H{
+		"doc_id":     docID,
+		"object_key": objectKey,
+		"status":     "ready",
+	})
+}
+
+// escapeLike escapes the LIKE/ILIKE metacharacters (backslash, percent,
+// underscore) so a user-supplied string is matched as a literal substring.
+// The backslash itself must be escaped first. Used with ESCAPE '\' in the query.
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "%", `\%`)
+	s = strings.ReplaceAll(s, "_", `\_`)
+	return s
+}
+
 func nullablePostForm(c *gin.Context, key string) *string {
 	v := strings.TrimSpace(c.PostForm(key))
 	if v == "" {
 		return nil
 	}
 	return &v
+}
+
+// parseDate validates YYYY-MM-DD format; returns error on invalid input.
+func parseDate(s string) (string, error) {
+	if len(s) != 10 || s[4] != '-' || s[7] != '-' {
+		return "", fmt.Errorf("invalid date format")
+	}
+	// time.Parse validates the actual calendar values.
+	if _, err := time.Parse("2006-01-02", s); err != nil {
+		return "", err
+	}
+	return s, nil
+}
+
+// validateDecimal rejects strings that are not a valid decimal number
+// (optional leading minus, digits, optional single decimal point).
+func validateDecimal(s string) error {
+	if s == "" {
+		return nil
+	}
+	start := 0
+	if s[0] == '-' {
+		start = 1
+	}
+	if start == len(s) {
+		return fmt.Errorf("invalid decimal")
+	}
+	dotSeen := false
+	for _, ch := range s[start:] {
+		if ch == '.' {
+			if dotSeen {
+				return fmt.Errorf("invalid decimal")
+			}
+			dotSeen = true
+			continue
+		}
+		if ch < '0' || ch > '9' {
+			return fmt.Errorf("invalid decimal")
+		}
+	}
+	return nil
 }

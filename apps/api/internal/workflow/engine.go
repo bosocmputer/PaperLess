@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -52,7 +53,10 @@ func (e *Engine) Sign(ctx context.Context, in SignInput) error {
 		return fmt.Errorf("check idempotency: %w", err)
 	}
 
-	// Load the task with a lock on the workflow step row.
+	// Load the task WITHOUT a row lock first, only to learn its condition_type
+	// and sequence_no. The lock is acquired below in a condition-dependent way so
+	// that condition_type=1 never produces a lock-order inversion (see the long
+	// comment on the ordered lock).
 	var task Task
 	var stepID int64
 	var docStatus string
@@ -60,9 +64,7 @@ func (e *Engine) Sign(ctx context.Context, in SignInput) error {
 		SELECT st.id, st.document_id, st.workflow_step_id, st.assigned_user_id,
 		       st.sequence_no, st.condition_type, st.status, st.version
 		  FROM signature_tasks st
-		  JOIN documents d ON d.id = st.document_id
 		 WHERE st.id = $1
-		   FOR UPDATE OF st
 	`, in.TaskID).Scan(
 		&task.ID, &task.DocumentID, &stepID, &task.AssignedUserID,
 		&task.SequenceNo, &task.ConditionType, &task.Status, &task.Version,
@@ -72,6 +74,60 @@ func (e *Engine) Sign(ctx context.Context, in SignInput) error {
 	}
 	if err != nil {
 		return fmt.Errorf("load task: %w", err)
+	}
+
+	// Acquire the task lock(s).
+	//
+	// condition_type=1 deadlock fix — the winner skips every sibling in the same
+	// step. Previously each tx first locked only its OWN task row (FOR UPDATE OF
+	// st WHERE id=$1) and then the winner's sibling-skip UPDATE locked the other
+	// siblings in physical (ctid) order while the losers still held their own
+	// task lock — a classic lock-order inversion that Postgres aborts with
+	// SQLSTATE 40P01 (deadlock_detected) under contention.
+	//
+	// Fix: for condition_type=1, the FIRST lock this tx takes is the WHOLE sibling
+	// set, locked in a deterministic ascending-id order (no single-row lock is
+	// taken before it). Every concurrent signer therefore queues on the same
+	// lowest-id row first, so no lock cycle can form. Exactly-one-winner is
+	// preserved: a loser that finally acquires the set re-reads its own row as
+	// 'skipped'/'signed' below and returns ErrStepAlreadyActioned, never a 40P01.
+	//
+	// condition_type=2/3 have no sibling-skip step, so the original single-row
+	// lock is kept (no inversion is possible).
+	if task.ConditionType == ConditionAnyOne {
+		lockRows, err := tx.Query(ctx, `
+			SELECT id FROM signature_tasks
+			 WHERE document_id=$1 AND sequence_no=$2
+			 ORDER BY id
+			   FOR UPDATE
+		`, task.DocumentID, task.SequenceNo)
+		if err != nil {
+			return fmt.Errorf("lock sibling tasks: %w", err)
+		}
+		// Drain and close so the connection is free for subsequent writes
+		// (pgx single-conn-per-tx: an open rows cursor blocks further queries).
+		for lockRows.Next() {
+		}
+		lockErr := lockRows.Err()
+		lockRows.Close()
+		if lockErr != nil {
+			return fmt.Errorf("lock sibling tasks rows: %w", lockErr)
+		}
+	} else {
+		// Single-row lock for condition_type=2/3.
+		if _, err := tx.Exec(ctx,
+			`SELECT 1 FROM signature_tasks WHERE id=$1 FOR UPDATE`, in.TaskID,
+		); err != nil {
+			return fmt.Errorf("lock task: %w", err)
+		}
+	}
+
+	// Re-read this task's CURRENT status now that we hold the lock — a concurrent
+	// winner may have signed/skipped it while we were queued on the lock.
+	if err := tx.QueryRow(ctx,
+		`SELECT status, version FROM signature_tasks WHERE id=$1`, in.TaskID,
+	).Scan(&task.Status, &task.Version); err != nil {
+		return fmt.Errorf("re-read task: %w", err)
 	}
 
 	// Load doc status (not locked — we re-check after step evaluation).
@@ -99,8 +155,14 @@ func (e *Engine) Sign(ctx context.Context, in SignInput) error {
 		return fmt.Errorf("mark task signed: %w", err)
 	}
 
-	// Write signature event.
+	// Write signature event. A unique-violation on (task_id, request_id) means
+	// a concurrent request with the same request_id already committed — treat as
+	// idempotent success (the DB constraint is the atomic guard; the pre-check
+	// above is only a fast path that avoids an unnecessary INSERT).
 	if err := writeSignatureEvent(ctx, tx, in, task); err != nil {
+		if isDuplicateKey(err) {
+			return tx.Commit(ctx)
+		}
 		return err
 	}
 
@@ -341,7 +403,7 @@ func openNextSequence(ctx context.Context, tx pgx.Tx, docID int64, completedSeq 
 }
 
 func createTasksForSequence(ctx context.Context, tx pgx.Tx, docID int64, templateID int64, seqNo int) error {
-	// Get steps for this sequence.
+	// Load internal (assigned-user) tasks: steps with workflow_step_assignees rows.
 	rows, err := tx.Query(ctx, `
 		SELECT s.id, s.condition_type, a.user_id
 		  FROM workflow_steps s
@@ -354,14 +416,14 @@ func createTasksForSequence(ctx context.Context, tx pgx.Tx, docID int64, templat
 	}
 	defer rows.Close()
 
-	type row struct {
+	type assigneeRow struct {
 		stepID        int64
 		conditionType int16
 		userID        int64
 	}
-	var assignees []row
+	var assignees []assigneeRow
 	for rows.Next() {
-		var r row
+		var r assigneeRow
 		if err := rows.Scan(&r.stepID, &r.conditionType, &r.userID); err != nil {
 			return err
 		}
@@ -371,29 +433,47 @@ func createTasksForSequence(ctx context.Context, tx pgx.Tx, docID int64, templat
 		return err
 	}
 
-	// Guard against silently producing zero tasks for a non-empty sequence.
-	// A sequence that contains steps but yields no assignee tasks (e.g. a
-	// condition_type=3 external step, whose import-time signer creation is not
-	// yet built) must NOT be skipped — skipping it lets isDocumentComplete see
-	// no pending tasks and mark the document `completed` while the step was
-	// never actually signed. Return an error so the caller aborts the tx and
-	// the document stays in its prior (pending) state instead.
-	var stepCount, externalStepCount int
-	if err := tx.QueryRow(ctx, `
-		SELECT COUNT(*),
-		       COUNT(*) FILTER (WHERE condition_type = 3)
-		  FROM workflow_steps
-		 WHERE workflow_template_id=$1 AND sequence_no=$2
-	`, templateID, seqNo).Scan(&stepCount, &externalStepCount); err != nil {
-		return fmt.Errorf("count steps for sequence %d: %w", seqNo, err)
+	// Load external steps (condition_type=3): no assignees row by design.
+	// These produce a single `waiting` task with NULL assigned_user_id and
+	// NULL external_signer_id. The invite (Step 2) sets external_signer_id
+	// and flips the task to `open`.
+	extRows, err := tx.Query(ctx, `
+		SELECT id FROM workflow_steps
+		 WHERE workflow_template_id=$1 AND sequence_no=$2 AND condition_type=3
+	`, templateID, seqNo)
+	if err != nil {
+		return fmt.Errorf("load external steps: %w", err)
 	}
-	if len(assignees) == 0 && stepCount > 0 {
-		if externalStepCount > 0 {
-			return fmt.Errorf("sequence %d requires an external signer (condition_type=3) which is not yet supported on import; document left pending", seqNo)
+	defer extRows.Close()
+
+	var externalStepIDs []int64
+	for extRows.Next() {
+		var sid int64
+		if err := extRows.Scan(&sid); err != nil {
+			return err
 		}
-		return fmt.Errorf("sequence %d has %d step(s) but no assignees; cannot open tasks", seqNo, stepCount)
+		externalStepIDs = append(externalStepIDs, sid)
+	}
+	if err := extRows.Err(); err != nil {
+		return err
 	}
 
+	// Guard: a non-external sequence with steps but zero assignees is a config error.
+	// It must never silently complete — abort so the doc stays pending.
+	if len(assignees) == 0 && len(externalStepIDs) == 0 {
+		var stepCount int
+		if err := tx.QueryRow(ctx, `
+			SELECT COUNT(*) FROM workflow_steps
+			 WHERE workflow_template_id=$1 AND sequence_no=$2
+		`, templateID, seqNo).Scan(&stepCount); err != nil {
+			return fmt.Errorf("count steps for sequence %d: %w", seqNo, err)
+		}
+		if stepCount > 0 {
+			return fmt.Errorf("sequence %d has %d step(s) but no assignees; cannot open tasks", seqNo, stepCount)
+		}
+	}
+
+	// Create tasks for internal assignees (status='open').
 	for _, a := range assignees {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO signature_tasks
@@ -401,6 +481,19 @@ func createTasksForSequence(ctx context.Context, tx pgx.Tx, docID int64, templat
 			VALUES ($1, $2, $3, $4, $5, 'open', now())
 		`, docID, a.stepID, a.userID, seqNo, a.conditionType); err != nil {
 			return fmt.Errorf("create task: %w", err)
+		}
+	}
+
+	// Create one `waiting` task per external step. No signer identity yet —
+	// the invite (Step 2) sets external_signer_id and flips status to `open`.
+	for _, sid := range externalStepIDs {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO signature_tasks
+			       (document_id, workflow_step_id, assigned_user_id, external_signer_id,
+			        sequence_no, condition_type, status)
+			VALUES ($1, $2, NULL, NULL, $3, 3, 'waiting')
+		`, docID, sid, seqNo); err != nil {
+			return fmt.Errorf("create external task: %w", err)
 		}
 	}
 	return nil
@@ -449,11 +542,43 @@ func writeAuditLog(ctx context.Context, tx pgx.Tx, action, entityType string, en
 	return err
 }
 
+func writeExternalSignatureEvent(ctx context.Context, tx pgx.Tx, in SignInput, task Task, extSignerID int64) error {
+	// Signer name: prefer ExternalSignerName from input; fall back to DB lookup.
+	signerName := in.ExternalSignerName
+	if signerName == "" {
+		_ = tx.QueryRow(ctx, `SELECT name FROM external_signers WHERE id=$1`, extSignerID).Scan(&signerName)
+	}
+	if signerName == "" {
+		signerName = "External Signer"
+	}
+	_, err := tx.Exec(ctx, `
+		INSERT INTO signature_events
+		       (task_id, document_id, signer_type, external_signer_id, signer_name, action,
+		        signature_image_hash, comment, consent_text, ip_address, user_agent,
+		        request_id, signed_at)
+		VALUES ($1, $2, 'external', $3, $4, 'sign',
+		        $5, $6, $7,
+		        $8::inet, $9,
+		        $10, now())
+	`, task.ID, task.DocumentID, extSignerID, signerName,
+		in.SignatureImageHash, in.Comment, in.ConsentText,
+		nullableString(in.IPAddress), in.UserAgent,
+		in.RequestID,
+	)
+	return err
+}
+
 func nullableString(s string) *string {
 	if s == "" {
 		return nil
 	}
 	return &s
+}
+
+// isDuplicateKey returns true when err is a PostgreSQL unique-violation (SQLSTATE 23505).
+func isDuplicateKey(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // ExternalSign validates and processes an external signer's signature.
@@ -500,7 +625,7 @@ func (e *Engine) ExternalSign(ctx context.Context, taskID int64, tokenHash strin
 		return err
 	}
 
-	// Write event (external).
+	// Write event (external signer type).
 	var docID int64
 	var seqNo int
 	var ct ConditionType
@@ -509,7 +634,10 @@ func (e *Engine) ExternalSign(ctx context.Context, taskID int64, tokenHash strin
 	).Scan(&docID, &seqNo, &ct)
 
 	task := Task{ID: taskID, DocumentID: docID, SequenceNo: seqNo, ConditionType: ct}
-	if err := writeSignatureEvent(ctx, tx, in, task); err != nil {
+	if err := writeExternalSignatureEvent(ctx, tx, in, task, extSignerID); err != nil {
+		if isDuplicateKey(err) {
+			return tx.Commit(ctx)
+		}
 		return err
 	}
 

@@ -53,15 +53,16 @@ type Task struct {
 
 // SignInput is the request from a signer to sign their task.
 type SignInput struct {
-	TaskID           int64
-	SignerUserID     int64
+	TaskID             int64
+	SignerUserID       int64
+	ExternalSignerName string // set for external signers (signer_type='external'); ignored for internal
 	SignatureImageHash string
-	Comment          string
-	ConsentText      string
-	IPAddress        string
-	UserAgent        string
-	SessionID        string
-	RequestID        string
+	Comment            string
+	ConsentText        string
+	IPAddress          string
+	UserAgent          string
+	SessionID          string
+	RequestID          string
 }
 
 // RejectInput is the request from a signer to reject a document at their task.

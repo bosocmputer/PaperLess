@@ -15,11 +15,17 @@ const MESSAGES: Record<string, string> = {
   attachment_upload_failed:    "อัปโหลดไฟล์แนบไม่สำเร็จ กรุณาลองใหม่",
   sml_sync_failed:             "การส่งข้อมูลไปยังระบบ SML ล้มเหลว เอกสารยังใช้งานได้ตามปกติ",
   pdf_preview_failed:          "ไม่สามารถแสดงเอกสารในหน้าเว็บ",
+  pdf_generation_pending:      "เอกสารเสร็จแล้ว กำลังสร้างไฟล์ PDF — ลองใหม่อีกครู่",
   workflow_config_missing:     "ไม่พบการตั้งค่า Workflow สำหรับเอกสารประเภทนี้",
   duplicate_document:          "เอกสารนี้ถูกนำเข้าระบบแล้ว",
   external_signer_info_missing:"ข้อมูลผู้เซ็นภายนอกไม่ครบถ้วน",
   unauthorized:                "กรุณาเข้าสู่ระบบใหม่",
   network_error:               "ไม่มีการเชื่อมต่ออินเทอร์เน็ต",
+  // External signer states
+  external_link_expired:       "ลิงก์เซ็นเอกสารนี้หมดอายุแล้ว กรุณาติดต่อผู้ส่งเพื่อขอลิงก์ใหม่",
+  external_link_used:          "เอกสารนี้ได้รับการเซ็นแล้ว ขอบคุณที่ดำเนินการ",
+  external_link_invalid:       "ลิงก์ไม่ถูกต้องหรือไม่มีอยู่ในระบบ",
+  rate_limited:                "มีการร้องขอมากเกินไป กรุณาลองใหม่ในอีกสักครู่",
 };
 
 export default function ErrorState({ code, message, onRetry }: Props) {

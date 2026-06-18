@@ -74,3 +74,23 @@ func (c *Client) Get(ctx context.Context, objectKey string) (io.ReadCloser, int6
 func (c *Client) Delete(ctx context.Context, objectKey string) error {
 	return c.mc.RemoveObject(ctx, c.bucket, objectKey, minio.RemoveObjectOptions{})
 }
+
+// Ping verifies MinIO is reachable AND the configured bucket exists. Both are
+// required for the service to function — uploads and PDF downloads all target
+// this bucket. Returns an error if the server is unreachable, credentials are
+// rejected, or the bucket is missing.
+//
+// IMPORTANT: BucketExists returns (false, nil) — NOT an error — when the server
+// is reachable but the bucket does not exist (e.g. MinIO restarted with a fresh
+// volume). A bare error check would report healthy in that case while every
+// file operation fails. We must treat a missing bucket as unhealthy explicitly.
+func (c *Client) Ping(ctx context.Context) error {
+	exists, err := c.mc.BucketExists(ctx, c.bucket)
+	if err != nil {
+		return fmt.Errorf("minio ping: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("minio ping: bucket %q does not exist", c.bucket)
+	}
+	return nil
+}
