@@ -330,6 +330,8 @@ PaperLess จับคู่ workflow ด้วย `doc_format_code` (POP/INV/PU
 
 **ตอบ:**
 
+lock แต่ doc_no ที่ user ระบุ ให้ เซ็นต์เอกสาร เท่านั้น  เช่น ใบสั่งซื้อ ก็ lock แค่ ใบ สั่งซื้อ 
+
 
 ### G2. trans_flag ของ PA(12) / PB(213) / PV(19) ยังไม่มีใน sml-api-bybos
 ดู `sml-api-bybos` code จริง — mapping table (`doc_no.go`) + constants (`models/transaction.go`) **ขาด 3 ชนิดที่ PaperLess ต้องใช้:**
@@ -342,5 +344,37 @@ PaperLess จับคู่ workflow ด้วย `doc_format_code` (POP/INV/PU
 | PV จ่ายชำระ | PV26060001 | 19 | ap_ar_trans | ❌ ขาดทั้ง const + map |
 
 **ขอ:** ทีม sml-api-bybos เพิ่ม trans_flag 12/213/19 + map `pa/pb/pv → table` ให้ครบ (และ chain ฝั่ง ap_ar ผูกที่ column ไหน — `ic_trans_detail.ref_doc_no` เป็นของ ic_trans; ap_ar มี detail table แยก `ap_ar_trans_detail`)
+
+**ตอบ:**
+
+เพิ่มได้เลย
+
+> **[PaperLess ดำเนินการ + เจอ chain gap จาก DB จริง]**
+> - G2: ทีมไฟเขียว → PaperLess เพิ่ม trans_flag PA(12)/PB(213)/PV(19) + map + lock endpoint ใน sml-api-bybos แล้ว
+> - **เจอเพิ่มจาก DB:** chain 2 table ใช้ **คนละ column**:
+>   - `ic_trans_detail.ref_doc_no` → PA ชี้ PO (ฝั่งซื้อ ic_trans)
+>   - `ap_ar_trans_detail.doc_ref` → PV ชี้ PB (ฝั่งเจ้าหนี้ ap_ar) — `ref_doc_no` ว่าง!
+
+---
+
+## รอบที่ 4 — chain gap (PaperLess เจอตอน verify DB ก่อนเขียน lock)
+
+### G3. Chain เชื่อมคนละ column + ขาดตอนที่ PB
+ไล่ chain เต็มสาย PO→PA→PB→PV ใน `sml1_2026` จริง เจอว่า:
+
+```
+PO26060001 (ic_trans)
+   ↑ ic_trans_detail.ref_doc_no = PO26060001
+PA26060001 (ic_trans)
+   ↑ ??? — PB ไม่มี ref ชี้กลับ PA (ref_doc_no + doc_ref ว่างทั้งคู่)
+PB26060001 (ap_ar_trans)
+   ↑ ap_ar_trans_detail.doc_ref = PB26060001   ← คนละ column กับฝั่ง ic!
+PV26060001 (ap_ar_trans)
+```
+
+- **คำถาม 1:** ยืนยันว่า chain ฝั่ง ap_ar ใช้ `ap_ar_trans_detail.doc_ref` (ไม่ใช่ `ref_doc_no`) ถูกไหม?
+- **คำถาม 2:** PB ควรชี้กลับ PA ที่ column ไหน? (test data ขาด หรือ chain ตั้งใจแยกเป็น 2 ช่วง: ฝั่งซื้อ ic / ฝั่งจ่าย ap_ar)
+
+**ผลกระทบ:** feature "ดูเอกสารที่เกี่ยวข้อง" — ถ้า chain ขาดที่ ic↔ap_ar จริง PaperLess จะ link ได้แค่ภายในแต่ละฝั่ง ไม่ทะลุทั้งสาย (ไม่ block lock; เป็น feature รอง)
 
 **ตอบ:**
