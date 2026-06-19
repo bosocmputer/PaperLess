@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"paperless-api/internal/workflow"
@@ -937,5 +938,160 @@ func TestCondition1_NoDeadlock_ManySiblings(t *testing.T) {
 		}
 
 		cleanupDoc(pool, docID)
+	}
+}
+
+// ── SML enqueue tests ────────────────────────────────────────────────────────
+
+// signToCompletion drives a seedWorkflow document all the way to `completed` by
+// signing every open task, sequence by sequence, until none remain. The engine
+// opens the next sequence's tasks (from template assignees) as each step
+// completes, so we re-query `status='open'` after each sign rather than rely on
+// pre-seeded task IDs. This exercises the real production completion path — the
+// same path that calls enqueueLockJob.
+func signToCompletion(t *testing.T, pool *pgxpool.Pool, engine *workflow.Engine, docID int64) {
+	t.Helper()
+	ctx := context.Background()
+
+	// Bounded loop: each open task signed by its assigned user. The POP chain is
+	// maker → 2 checkers → approver, so 6 iterations is a safe ceiling.
+	for i := 0; i < 12; i++ {
+		var taskID, assignedUID int64
+		err := pool.QueryRow(ctx, `
+			SELECT id, assigned_user_id FROM signature_tasks
+			 WHERE document_id=$1 AND status='open' AND assigned_user_id IS NOT NULL
+			 ORDER BY sequence_no, id
+			 LIMIT 1
+		`, docID).Scan(&taskID, &assignedUID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			break // no more open internal tasks
+		}
+		if err != nil {
+			t.Fatalf("query open task: %v", err)
+		}
+		if err := engine.Sign(ctx, workflow.SignInput{
+			TaskID: taskID, SignerUserID: assignedUID, RequestID: fmt.Sprintf("c-%d-%d", docID, taskID),
+		}); err != nil {
+			t.Fatalf("sign task %d: %v", taskID, err)
+		}
+	}
+
+	var docStatus string
+	_ = pool.QueryRow(ctx, `SELECT status FROM documents WHERE id=$1`, docID).Scan(&docStatus)
+	if docStatus != "completed" {
+		t.Fatalf("doc status after full sign chain: want completed, got %s", docStatus)
+	}
+}
+
+// seedDocForCompletion creates a POP document with ONLY the seq=1 MAKER task
+// open (no pre-seeded seq=2/seq=3 rows). The engine opens later sequences from
+// the template's assignees as each step completes, so the document can actually
+// reach `completed` — unlike seedWorkflow, whose pre-seeded `waiting` rows never
+// resolve and intentionally hold the doc `pending`.
+func seedDocForCompletion(t *testing.T, pool *pgxpool.Pool) (docID int64) {
+	t.Helper()
+	ctx := context.Background()
+
+	var templateID int64
+	var templateVersion int
+	if err := pool.QueryRow(ctx,
+		`SELECT id, version FROM workflow_templates WHERE doc_format_code='POP' AND status='active'`,
+	).Scan(&templateID, &templateVersion); err != nil {
+		t.Fatalf("find POP template: %v", err)
+	}
+
+	var makerStepID, makerUserID int64
+	_ = pool.QueryRow(ctx,
+		`SELECT id FROM workflow_steps WHERE workflow_template_id=$1 AND position_code='MAKER'`, templateID,
+	).Scan(&makerStepID)
+	_ = pool.QueryRow(ctx,
+		`SELECT a.user_id FROM workflow_step_assignees a WHERE a.workflow_step_id=$1 ORDER BY a.display_order LIMIT 1`,
+		makerStepID,
+	).Scan(&makerUserID)
+
+	idKey := fmt.Sprintf("POP:SML-COMPLETE:%d", time.Now().UnixNano())
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO documents (doc_format_code, doc_no, revision, workflow_template_id, workflow_version,
+		                       status, idempotency_key, source_hash)
+		VALUES ('POP', $1, 0, $2, $3, 'pending', $4, 'testhash')
+		RETURNING id
+	`, fmt.Sprintf("SML-COMPLETE-%d", time.Now().UnixNano()), templateID, templateVersion, idKey).Scan(&docID); err != nil {
+		t.Fatalf("insert doc: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO signature_tasks (document_id, workflow_step_id, assigned_user_id, sequence_no, condition_type, status, opened_at)
+		VALUES ($1, $2, $3, 1, 1, 'open', now())
+	`, docID, makerStepID, makerUserID); err != nil {
+		t.Fatalf("insert maker task: %v", err)
+	}
+
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, `DELETE FROM sml_sync_jobs WHERE document_id=$1`, docID)
+		cleanupDoc(pool, docID)
+	})
+	return docID
+}
+
+func TestEnqueueLockJob_OnDocumentCompletion(t *testing.T) {
+	pool := testDB(t)
+	ctx := context.Background()
+	engine := workflow.New(pool)
+
+	docID := seedDocForCompletion(t, pool)
+	signToCompletion(t, pool, engine, docID)
+
+	// Exactly one update_lock job must be enqueued.
+	var jobCount int
+	_ = pool.QueryRow(ctx,
+		`SELECT count(*) FROM sml_sync_jobs WHERE document_id=$1 AND job_type='update_lock' AND status='pending'`,
+		docID,
+	).Scan(&jobCount)
+	if jobCount != 1 {
+		t.Errorf("sml_sync_jobs: want 1 pending update_lock job, got %d", jobCount)
+	}
+
+	// sync_status must be sync_pending.
+	var syncStatus string
+	_ = pool.QueryRow(ctx, `SELECT sync_status FROM documents WHERE id=$1`, docID).Scan(&syncStatus)
+	if syncStatus != "sync_pending" {
+		t.Errorf("sync_status: want sync_pending, got %s", syncStatus)
+	}
+}
+
+func TestEnqueueLockJob_Idempotent_NoDuplicateOnReEntry(t *testing.T) {
+	pool := testDB(t)
+	ctx := context.Background()
+	engine := workflow.New(pool)
+
+	docID := seedDocForCompletion(t, pool)
+
+	// Drive to completion — enqueues exactly one job.
+	signToCompletion(t, pool, engine, docID)
+
+	// Simulate a second enqueue attempt (mirrors enqueueLockJob's WHERE NOT EXISTS
+	// guard). A pending job already exists, so this must insert nothing.
+	_, err := pool.Exec(ctx, `
+		INSERT INTO sml_sync_jobs (document_id, job_type, status)
+		SELECT $1, 'update_lock', 'pending'
+		 WHERE NOT EXISTS (
+			SELECT 1 FROM sml_sync_jobs
+			 WHERE document_id=$1
+			   AND job_type='update_lock'
+			   AND status IN ('pending','running','retry')
+		 )
+	`, docID)
+	if err != nil {
+		t.Fatalf("second enqueue attempt: %v", err)
+	}
+
+	var jobCount int
+	_ = pool.QueryRow(ctx,
+		`SELECT count(*) FROM sml_sync_jobs WHERE document_id=$1 AND job_type='update_lock'`,
+		docID,
+	).Scan(&jobCount)
+	if jobCount != 1 {
+		t.Errorf("want exactly 1 update_lock job after duplicate attempt, got %d", jobCount)
 	}
 }

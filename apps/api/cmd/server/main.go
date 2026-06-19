@@ -16,6 +16,7 @@ import (
 	"paperless-api/internal/db"
 	"paperless-api/internal/handlers"
 	"paperless-api/internal/middleware"
+	"paperless-api/internal/sml"
 	"paperless-api/internal/storage"
 	"paperless-api/internal/workflow"
 )
@@ -49,6 +50,18 @@ func main() {
 	}
 
 	wfEngine := workflow.New(pool)
+
+	// SML sync worker — only started when SML is configured.
+	// During pilot (no SML_API_KEY), jobs queue as 'pending' harmlessly.
+	workerCtx, workerCancel := context.WithCancel(ctx)
+	defer workerCancel()
+	if smlClient := sml.NewClient(cfg); smlClient != nil {
+		smlWorker := sml.NewWorker(pool, smlClient, logger, 5*time.Second)
+		go smlWorker.Run(workerCtx)
+		logger.Info("sml sync worker started", zap.String("base_url", cfg.SML.BaseURL))
+	} else {
+		logger.Info("sml sync worker disabled (SML_API_KEY not set)")
+	}
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -170,6 +183,7 @@ func main() {
 	<-quit
 
 	logger.Info("shutting down...")
+	workerCancel() // stop sml worker before draining HTTP
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

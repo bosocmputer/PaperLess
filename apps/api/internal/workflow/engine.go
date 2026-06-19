@@ -208,6 +208,9 @@ func (e *Engine) Sign(ctx context.Context, in SignInput) error {
 			if err := writeAuditLog(ctx, tx, "document_completed", "document", task.DocumentID, in.SignerUserID); err != nil {
 				return err
 			}
+			if err := enqueueLockJob(ctx, tx, task.DocumentID); err != nil {
+				return fmt.Errorf("enqueue sml lock job: %w", err)
+			}
 		}
 	}
 
@@ -542,6 +545,30 @@ func writeAuditLog(ctx context.Context, tx pgx.Tx, action, entityType string, en
 	return err
 }
 
+// enqueueLockJob inserts one update_lock job for documentID inside an existing
+// transaction. A WHERE NOT EXISTS guard prevents duplicates if completion logic
+// is ever re-entered (e.g. idempotent re-delivery).
+func enqueueLockJob(ctx context.Context, tx pgx.Tx, documentID int64) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO sml_sync_jobs (document_id, job_type, status)
+		SELECT $1, 'update_lock', 'pending'
+		 WHERE NOT EXISTS (
+			SELECT 1 FROM sml_sync_jobs
+			 WHERE document_id=$1
+			   AND job_type='update_lock'
+			   AND status IN ('pending','running','retry')
+		 )
+	`, documentID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx,
+		`UPDATE documents SET sync_status='sync_pending', updated_at=now() WHERE id=$1`,
+		documentID,
+	)
+	return err
+}
+
 func writeExternalSignatureEvent(ctx context.Context, tx pgx.Tx, in SignInput, task Task, extSignerID int64) error {
 	// Signer name: prefer ExternalSignerName from input; fall back to DB lookup.
 	signerName := in.ExternalSignerName
@@ -655,8 +682,14 @@ func (e *Engine) ExternalSign(ctx context.Context, taskID int64, tokenHash strin
 			return err
 		}
 		if docComplete {
-			_, _ = tx.Exec(ctx,
-				`UPDATE documents SET status='completed', updated_at=now() WHERE id=$1`, docID)
+			if _, err := tx.Exec(ctx,
+				`UPDATE documents SET status='completed', updated_at=now() WHERE id=$1`, docID,
+			); err != nil {
+				return fmt.Errorf("mark doc completed (external): %w", err)
+			}
+			if err := enqueueLockJob(ctx, tx, docID); err != nil {
+				return fmt.Errorf("enqueue sml lock job (external): %w", err)
+			}
 		}
 	}
 
