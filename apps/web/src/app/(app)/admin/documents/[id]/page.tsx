@@ -261,7 +261,7 @@ export default function AdminDocDetailPage({ params }: PageProps) {
   return (
     <>
       <main className="min-h-screen bg-gray-50 flex flex-col">
-        <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
+        <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-12 z-10">
           <div className="max-w-3xl mx-auto flex items-center gap-3">
             <button onClick={() => router.back()} className="text-blue-600 text-sm flex-shrink-0">← กลับ</button>
             <div className="flex-1 min-w-0">

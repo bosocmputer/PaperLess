@@ -25,6 +25,21 @@ async function request<T>(
   return json as ApiResult<T>;
 }
 
+// Multipart import: do NOT set Content-Type — browser must set multipart boundary.
+async function importRequest<T>(
+  path: string,
+  token: string,
+  formData: FormData
+): Promise<ApiResult<T>> {
+  const headers: Record<string, string> = {
+    "X-Request-ID": crypto.randomUUID(),
+    "Authorization": `Bearer ${token}`,
+  };
+  const res = await fetch(`${BASE}${path}`, { method: "POST", body: formData, headers });
+  const json = await res.json().catch(() => ({ success: false, error: { code: "parse_error", message: "Invalid response" } }));
+  return json as ApiResult<T>;
+}
+
 // External sign requests: token in X-Signer-Token header, never in URL.
 async function externalRequest<T>(
   path: string,
@@ -197,6 +212,16 @@ export interface TemplateDetail {
   steps: TemplateStep[];
 }
 
+// Import result from POST /documents/import
+export interface ImportResult {
+  id: number;
+  doc_format_code: string;
+  doc_no: string;
+  revision: number;
+  status: string;
+  duplicate: boolean;
+}
+
 // Resend response — raw token returned once, stored in useRef never in state
 export interface ResendResponse {
   external_signer_id: number;
@@ -330,4 +355,25 @@ export const api = {
 
   deactivateTemplate: (token: string, id: string) =>
     request<{ id: string; status: string }>(`/workflow-templates/${id}/deactivate`, { method: "POST" }, token),
+
+  importDocument: (
+    token: string,
+    fields: {
+      file: File;
+      doc_format_code: string;
+      doc_no: string;
+      revision?: number;
+      doc_date?: string;
+      amount?: string;
+    }
+  ) => {
+    const fd = new FormData();
+    fd.append("file", fields.file);
+    fd.append("doc_format_code", fields.doc_format_code);
+    fd.append("doc_no", fields.doc_no);
+    if (fields.revision != null) fd.append("revision", String(fields.revision));
+    if (fields.doc_date) fd.append("doc_date", fields.doc_date);
+    if (fields.amount) fd.append("amount", fields.amount);
+    return importRequest<ImportResult>("/documents/import", token, fd);
+  },
 };

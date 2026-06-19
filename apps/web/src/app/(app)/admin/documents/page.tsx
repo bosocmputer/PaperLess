@@ -6,6 +6,22 @@ import { api, type DocumentRow } from "@/lib/api";
 import { getAccessToken, getUser } from "@/lib/auth";
 import ErrorState from "@/components/ErrorState";
 
+interface ImportForm {
+  file: File | null;
+  doc_no: string;
+  doc_format_code: string;
+  doc_date: string;
+  amount: string;
+}
+
+const IMPORT_FORM_INIT: ImportForm = {
+  file: null,
+  doc_no: "",
+  doc_format_code: "POP",
+  doc_date: "",
+  amount: "",
+};
+
 // Document status labels — pinned to documents.status CHECK (0001_init.up.sql):
 // imported,pending,rejected,completed,cancelled
 const DOC_STATUS_LABELS: Record<string, string> = {
@@ -46,6 +62,61 @@ export default function AdminDocumentsPage() {
   const [docFormatCode, setDocFormatCode] = useState("");
   const [q, setQ] = useState("");
   const [qInput, setQInput] = useState("");
+
+  // Import dialog state
+  const [showImport, setShowImport] = useState(false);
+  const [importForm, setImportForm] = useState<ImportForm>(IMPORT_FORM_INIT);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleImport = async () => {
+    if (!importForm.file || !importForm.doc_no.trim() || !importForm.doc_format_code.trim()) return;
+    const token = getAccessToken();
+    if (!token) { router.replace("/login"); return; }
+
+    setImporting(true);
+    setImportError(null);
+    setImportSuccess(null);
+    try {
+      const result = await api.importDocument(token, {
+        file: importForm.file,
+        doc_no: importForm.doc_no.trim(),
+        doc_format_code: importForm.doc_format_code.trim().toUpperCase(),
+        doc_date: importForm.doc_date || undefined,
+        amount: importForm.amount || undefined,
+      });
+      if (!result.success) {
+        if (result.error.code === "revision_conflict") {
+          setImportError("เลขเอกสารนี้มีอยู่แล้วด้วยไฟล์อื่น (409)");
+        } else if (result.error.code === "invalid_request") {
+          setImportError("ข้อมูลไม่ถูกต้อง: " + result.error.message);
+        } else {
+          setImportError(result.error.message || result.error.code);
+        }
+        return;
+      }
+      const msg = result.data.duplicate ? "เอกสารนี้มีอยู่แล้ว (นำเข้าซ้ำ)" : "นำเข้าสำเร็จ";
+      setImportSuccess(msg);
+      setShowImport(false);
+      setImportForm(IMPORT_FORM_INIT);
+      load(1, status, docFormatCode, q);
+      setPage(1);
+      // brief toast — auto-clear after 4s
+      setTimeout(() => setImportSuccess(null), 4000);
+    } catch {
+      setImportError("เกิดข้อผิดพลาดในการเชื่อมต่อ");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const closeImport = () => {
+    setShowImport(false);
+    setImportForm(IMPORT_FORM_INIT);
+    setImportError(null);
+  };
 
   // Debounce search input
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -106,20 +177,121 @@ export default function AdminDocumentsPage() {
 
   return (
     <main className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
+      {/* Success toast */}
+      {importSuccess && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-green-600 text-white text-sm px-4 py-2 rounded-lg shadow-lg">
+          {importSuccess}
+        </div>
+      )}
+
+      <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-12 z-10">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-2">
           <div>
             <h1 className="text-lg font-bold text-gray-900">เอกสารทั้งหมด</h1>
             {!loading && <p className="text-xs text-gray-500">{total} รายการ</p>}
           </div>
           <button
-            onClick={() => router.push("/admin/workflows")}
-            className="text-sm text-blue-600 px-3 py-1.5 border border-blue-200 rounded-lg"
+            type="button"
+            onClick={() => { setImportError(null); setImportForm(IMPORT_FORM_INIT); setShowImport(true); }}
+            className="text-sm text-green-700 px-3 py-1.5 border border-green-300 rounded-lg"
           >
-            Workflow Templates
+            นำเข้าเอกสาร
           </button>
         </div>
       </header>
+
+      {/* Import dialog */}
+      {showImport && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 flex flex-col gap-4">
+            <h2 className="text-base font-bold text-gray-900">นำเข้าเอกสาร</h2>
+
+            {/* File */}
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">ไฟล์ PDF <span className="text-red-500">*</span></label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf"
+                title="เลือกไฟล์ PDF"
+                className="text-sm text-gray-700 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400"
+                onChange={(e) => setImportForm((f) => ({ ...f, file: e.target.files?.[0] ?? null }))}
+              />
+            </div>
+
+            {/* doc_no */}
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">เลขเอกสาร <span className="text-red-500">*</span></label>
+              <input
+                type="text"
+                value={importForm.doc_no}
+                onChange={(e) => setImportForm((f) => ({ ...f, doc_no: e.target.value }))}
+                placeholder="เช่น PO26060001"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+              />
+            </div>
+
+            {/* doc_format_code */}
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">รูปแบบเอกสาร <span className="text-red-500">*</span></label>
+              <input
+                type="text"
+                value={importForm.doc_format_code}
+                onChange={(e) => setImportForm((f) => ({ ...f, doc_format_code: e.target.value.trim().toUpperCase() }))}
+                placeholder="POP"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+              />
+            </div>
+
+            {/* doc_date (optional) */}
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">วันที่เอกสาร <span className="text-gray-400 text-xs">(ไม่บังคับ)</span></label>
+              <input
+                type="date"
+                title="วันที่เอกสาร"
+                value={importForm.doc_date}
+                onChange={(e) => setImportForm((f) => ({ ...f, doc_date: e.target.value }))}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+              />
+            </div>
+
+            {/* amount (optional) */}
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">จำนวนเงิน <span className="text-gray-400 text-xs">(ไม่บังคับ)</span></label>
+              <input
+                type="text"
+                value={importForm.amount}
+                onChange={(e) => setImportForm((f) => ({ ...f, amount: e.target.value }))}
+                placeholder="เช่น 15000.00"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+              />
+            </div>
+
+            {/* Error */}
+            {importError && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{importError}</p>
+            )}
+
+            {/* Actions */}
+            <div className="flex justify-end gap-2 mt-1">
+              <button
+                onClick={closeImport}
+                disabled={importing}
+                className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg disabled:opacity-40"
+              >
+                ยกเลิก
+              </button>
+              <button
+                onClick={handleImport}
+                disabled={importing || !importForm.file || !importForm.doc_no.trim() || !importForm.doc_format_code.trim()}
+                className="px-4 py-2 text-sm text-white bg-green-600 rounded-lg disabled:opacity-40"
+              >
+                {importing ? "กำลังอัปโหลด..." : "อัปโหลด"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-3xl mx-auto px-4 py-4 flex flex-col gap-3">
         {/* Filters */}

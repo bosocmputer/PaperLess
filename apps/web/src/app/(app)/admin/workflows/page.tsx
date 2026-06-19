@@ -122,17 +122,9 @@ export default function AdminWorkflowsPage() {
 
   return (
     <main className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
-        <div className="max-w-3xl mx-auto flex items-center justify-between gap-2">
-          <div>
-            <h1 className="text-lg font-bold text-gray-900">Workflow Templates</h1>
-          </div>
-          <button
-            onClick={() => router.push("/admin/documents")}
-            className="text-sm text-blue-600 px-3 py-1.5 border border-blue-200 rounded-lg"
-          >
-            เอกสาร
-          </button>
+      <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-12 z-10">
+        <div className="max-w-3xl mx-auto">
+          <h1 className="text-lg font-bold text-gray-900">Workflow Templates</h1>
         </div>
       </header>
 
