@@ -301,3 +301,34 @@ PaperLess จับคู่ workflow ด้วย `doc_format_code` (POP/INV/PU
 > **งานฝั่ง sml-api-bybos ที่ต้องเพิ่มสำหรับ Phase 3:**
 > 1. `POST .../documents/:docNo/lock` → UPDATE `is_lock_record=1` (idempotent overwrite ตาม F2)
 > 2. (มีแล้วบางส่วน) endpoint อ่าน doc + chain ผ่าน `ic_trans_detail.ref_doc_no`
+
+---
+
+## รอบที่ 3 — Gap ที่เหลือก่อนเขียน Phase 3 (PaperLess ตรวจ DB + sml-api-bybos code แล้ว)
+
+> สองจุดนี้ **เป็นงานฝั่งทีม sml-api-bybos** (คนละ repo) PaperLess เดาเองไม่ได้ ขอคำยืนยัน/ข้อมูลก่อน
+
+### G1. lock บน `ap_ar_trans` (PB/PV) — ใช้ `is_lock_record=1` เหมือน `ic_trans` ไหม?
+ตรวจ DB จริง:
+- `ap_ar_trans` **มี** column `is_lock_record` (integer) — โครงสร้างเหมือน `ic_trans`
+- แต่ **ทั้งฐานทดสอบไม่มี ap_ar_trans ที่ lock=1 เลย** (PB26060001, PV26060001 = 0 ทั้งคู่) → ยังพิสูจน์ไม่ได้ว่า lock ตรงนี้ใช้ได้จริง
+- `ic_trans.is_lock_record` มี **NULL 129 row** (column nullable) → UPDATE ต้อง handle `NULL→1` ด้วย ไม่ใช่แค่ `0→1`
+
+**ขอ:** ยืนยันว่า lock PB/PV = `UPDATE ap_ar_trans SET is_lock_record=1 WHERE doc_no=...` ถูกต้อง + ขอ 1 ตัวอย่าง ap_ar_trans ที่ lock จริง (เหมือนที่ให้ PO26060002 มา)
+
+**ตอบ:**
+
+
+### G2. trans_flag ของ PA(12) / PB(213) / PV(19) ยังไม่มีใน sml-api-bybos
+ดู `sml-api-bybos` code จริง — mapping table (`doc_no.go`) + constants (`models/transaction.go`) **ขาด 3 ชนิดที่ PaperLess ต้องใช้:**
+
+| PaperLess ต้องใช้ | doc_no ตัวอย่าง | trans_flag | table | มีใน sml-api-bybos? |
+|---|---|---|---|---|
+| PO ใบสั่งซื้อ | PO26060001 | 6 | ic_trans | ✅ `po` |
+| PA ซื้อ | PA26060001 | 12 | ic_trans | ❌ ขาด (มี const `PurchaseInvoice=12` แต่ไม่มีใน doc_no map) |
+| PB ใบรับวางบิล | PB26060001 | 213 | ap_ar_trans | ❌ ขาดทั้ง const + map |
+| PV จ่ายชำระ | PV26060001 | 19 | ap_ar_trans | ❌ ขาดทั้ง const + map |
+
+**ขอ:** ทีม sml-api-bybos เพิ่ม trans_flag 12/213/19 + map `pa/pb/pv → table` ให้ครบ (และ chain ฝั่ง ap_ar ผูกที่ column ไหน — `ic_trans_detail.ref_doc_no` เป็นของ ic_trans; ap_ar มี detail table แยก `ap_ar_trans_detail`)
+
+**ตอบ:**
