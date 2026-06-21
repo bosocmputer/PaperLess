@@ -137,10 +137,18 @@ func main() {
 	{
 		wfTmplG.GET("", wfTmplH.ListTemplates)
 		wfTmplG.GET("/:id", wfTmplH.GetTemplate)
+		wfTmplG.POST("", wfTmplH.Create)
+		wfTmplG.PUT("/:id", wfTmplH.Update)
+		wfTmplG.PUT("/:id/steps", wfTmplH.UpdateSteps)
 		wfTmplG.POST("/:id/clone", wfTmplH.Clone)
 		wfTmplG.POST("/:id/publish", wfTmplH.Publish)
 		wfTmplG.POST("/:id/deactivate", wfTmplH.Deactivate)
 	}
+
+	// Users — list active users for the workflow editor's assignee picker.
+	userH := handlers.NewUserHandler(pool, logger)
+	v1.GET("/users", requireAuth,
+		middleware.RequireRole("workflow_admin", "system_admin"), userH.List)
 
 	// Standalone attachment delete (by file id, not doc id)
 	v1.DELETE("/attachments/:id", requireAuth, attachH.Delete)

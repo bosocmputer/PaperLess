@@ -271,6 +271,22 @@ func (h *WorkflowTemplateHandler) Publish(c *gin.Context) {
 		return
 	}
 
+	// Guard: never publish a template with no steps — it would create documents
+	// that can never progress (the engine has nothing to open).
+	var stepCount int
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*) FROM workflow_steps WHERE workflow_template_id=$1
+	`, tmplID).Scan(&stepCount); err != nil {
+		h.log.Error("publish: count steps", zap.Error(err))
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "publish failed")
+		return
+	}
+	if stepCount == 0 {
+		httpx.Error(c, http.StatusUnprocessableEntity, "no_steps",
+			"cannot publish a workflow with no steps")
+		return
+	}
+
 	// Demote any existing active for this doc_format_code to inactive.
 	// This runs BEFORE the target is set to active so the partial unique index
 	// (only one active per format) is satisfied within the same tx.
