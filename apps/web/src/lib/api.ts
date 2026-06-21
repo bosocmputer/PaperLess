@@ -212,6 +212,24 @@ export interface TemplateDetail {
   steps: TemplateStep[];
 }
 
+// Active user option for the workflow editor's assignee picker (GET /users)
+export interface UserOption {
+  id: string;
+  username: string;
+  display_name: string;
+  status: string;
+}
+
+// One step in the workflow editor's replace-all payload (PUT /:id/steps).
+// assignee_user_ids must be empty for condition_type 3 (external), ≥1 for 1/2.
+export interface StepInput {
+  position_code: string;
+  position_name: string;
+  sequence_no: number;
+  condition_type: number;
+  assignee_user_ids: number[];
+}
+
 // Import result from POST /documents/import
 export interface ImportResult {
   id: number;
@@ -355,6 +373,24 @@ export const api = {
 
   deactivateTemplate: (token: string, id: string) =>
     request<{ id: string; status: string }>(`/workflow-templates/${id}/deactivate`, { method: "POST" }, token),
+
+  // ── Workflow config editor (Phase B) ──
+  listUsers: (token: string) => request<UserOption[]>("/users", {}, token),
+
+  createTemplate: (token: string, body: { doc_format_code: string; name: string }) =>
+    request<{ id: string; doc_format_code: string; name: string; version: number; status: string }>(
+      "/workflow-templates", { method: "POST", body: JSON.stringify(body) }, token
+    ),
+
+  updateTemplate: (token: string, id: string, body: { name: string }) =>
+    request<{ id: string; name: string }>(
+      `/workflow-templates/${id}`, { method: "PUT", body: JSON.stringify(body) }, token
+    ),
+
+  updateSteps: (token: string, id: string, steps: StepInput[]) =>
+    request<{ id: string; step_count: number }>(
+      `/workflow-templates/${id}/steps`, { method: "PUT", body: JSON.stringify({ steps }) }, token
+    ),
 
   importDocument: (
     token: string,

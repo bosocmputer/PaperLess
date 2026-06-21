@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, type TemplateRow, type TemplateDetail } from "@/lib/api";
 import { getAccessToken, getUser } from "@/lib/auth";
 import ErrorState from "@/components/ErrorState";
-import { Button, Card, Spinner, StatusBadge } from "@/components/ui";
+import { Button, Card, Input, Spinner, StatusBadge } from "@/components/ui";
 
 function isWorkflowAdmin(roles: string[]): boolean {
   return roles.some((r) => ["workflow_admin", "system_admin"].includes(r));
@@ -30,6 +30,26 @@ export default function AdminWorkflowsPage() {
 
   const [userRoles, setUserRoles] = useState<string[]>([]);
   const canWrite = isWorkflowAdmin(userRoles);
+
+  // Create-template dialog
+  const [showCreate, setShowCreate] = useState(false);
+  const [newFormat, setNewFormat] = useState("");
+  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createErr, setCreateErr] = useState<string | null>(null);
+
+  const handleCreate = async () => {
+    const token = getAccessToken();
+    if (!token) return;
+    const fmt = newFormat.trim().toUpperCase();
+    if (!fmt || !newName.trim()) { setCreateErr("กรอกรหัสรูปแบบและชื่อ"); return; }
+    setCreating(true);
+    setCreateErr(null);
+    const res = await api.createTemplate(token, { doc_format_code: fmt, name: newName.trim() });
+    setCreating(false);
+    if (!res.success) { setCreateErr(res.error.message || res.error.code); return; }
+    router.push(`/admin/workflows/${res.data.id}`);
+  };
 
   const loadTemplates = useCallback(async (fmt: string) => {
     const token = getAccessToken();
@@ -108,10 +128,34 @@ export default function AdminWorkflowsPage() {
   return (
     <main className="min-h-screen">
       <header className="bg-surface border-b border-line px-4 py-4 sticky top-12 z-10">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-3xl mx-auto flex items-center justify-between gap-2">
           <h1 className="text-lg font-bold text-ink">Workflow Templates</h1>
+          {canWrite && (
+            <Button size="sm" onClick={() => { setNewFormat(""); setNewName(""); setCreateErr(null); setShowCreate(true); }}>
+              + สร้าง Workflow
+            </Button>
+          )}
         </div>
       </header>
+
+      {/* Create dialog */}
+      {showCreate && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-surface rounded-2xl shadow-pop w-full max-w-md p-6 flex flex-col gap-4">
+            <h2 className="text-base font-bold text-ink">สร้าง Workflow ใหม่</h2>
+            <Input label="รหัสรูปแบบเอกสาร (doc format)" value={newFormat}
+              onChange={(e) => setNewFormat(e.target.value.toUpperCase())} placeholder="เช่น POP, INV" maxLength={50} />
+            <Input label="ชื่อ Workflow" value={newName}
+              onChange={(e) => setNewName(e.target.value)} placeholder="เช่น ใบสั่งซื้อ (POP)" maxLength={200} />
+            <p className="text-xs text-muted">จะสร้างเป็น <strong>ฉบับร่าง</strong> เวอร์ชันถัดไปของรูปแบบนี้ แล้วพาไปหน้าแก้ไขขั้นตอน</p>
+            {createErr && <p className="text-sm text-danger-fg bg-danger-bg border border-danger/30 rounded-md px-3 py-2">{createErr}</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowCreate(false)} disabled={creating}>ยกเลิก</Button>
+              <Button onClick={handleCreate} loading={creating} disabled={!newFormat.trim() || !newName.trim()}>สร้างฉบับร่าง</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-3xl mx-auto px-4 py-4 flex flex-col gap-4">
 
@@ -175,6 +219,12 @@ export default function AdminWorkflowsPage() {
                     {/* Actions */}
                     {canWrite && (
                       <div className="flex gap-2 mt-3 flex-wrap">
+                        <Button
+                          size="sm"
+                          onClick={() => router.push(`/admin/workflows/${t.id}`)}
+                        >
+                          {t.status === "draft" ? "แก้ไขขั้นตอน →" : "เปิด / โคลน →"}
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
