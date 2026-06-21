@@ -230,6 +230,22 @@ export interface StepInput {
   assignee_user_ids: number[];
 }
 
+// Full user record for the admin user-management page (GET /admin/users)
+export interface AdminUser {
+  id: string;
+  username: string;
+  display_name: string;
+  email: string;
+  phone: string;
+  status: string;
+  roles: string[];
+}
+
+export interface RoleOption {
+  code: string;
+  name: string;
+}
+
 // Import result from POST /documents/import
 export interface ImportResult {
   id: number;
@@ -391,6 +407,23 @@ export const api = {
     request<{ id: string; step_count: number }>(
       `/workflow-templates/${id}/steps`, { method: "PUT", body: JSON.stringify({ steps }) }, token
     ),
+
+  // ── User management (Phase C, system_admin) ──
+  listRoles: (token: string) => request<RoleOption[]>("/roles", {}, token),
+
+  listAdminUsers: (token: string, includeInactive = false) =>
+    request<AdminUser[]>(`/admin/users${includeInactive ? "?include_inactive=1" : ""}`, {}, token),
+
+  createUser: (
+    token: string,
+    body: { username: string; display_name: string; email?: string; phone?: string; roles: string[]; password?: string }
+  ) => request<AdminUser>("/admin/users", { method: "POST", body: JSON.stringify(body) }, token),
+
+  updateUser: (
+    token: string,
+    id: string,
+    body: { display_name: string; email?: string; phone?: string; status: string; roles: string[]; password?: string }
+  ) => request<AdminUser>(`/admin/users/${id}`, { method: "PUT", body: JSON.stringify(body) }, token),
 
   importDocument: (
     token: string,

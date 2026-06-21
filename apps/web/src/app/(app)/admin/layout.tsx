@@ -5,9 +5,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { getAccessToken, getUser, clearSession, getRefreshToken } from "@/lib/auth";
 
-// Phase C will add { href: "/admin/users", label: "ผู้ใช้", systemAdminOnly: true }.
-// Held back until the page exists so system_admin doesn't get a 404 link.
-const NAV_LINKS = [
+const BASE_NAV_LINKS = [
   { href: "/admin/documents", label: "เอกสาร" },
   { href: "/admin/workflows", label: "ตั้งค่า Workflow" },
 ];
@@ -16,13 +14,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const router = useRouter();
   const [displayName, setDisplayName] = useState("");
+  const [isSysAdmin, setIsSysAdmin] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
   useEffect(() => {
-    const user = getUser<{ display_name: string }>();
+    const user = getUser<{ display_name: string; roles: string[] }>();
     if (!user) return;
     setDisplayName(user.display_name);
+    setIsSysAdmin((user.roles ?? []).includes("system_admin"));
   }, []);
+
+  // User management is system_admin-only — show the link only then.
+  const NAV_LINKS = isSysAdmin
+    ? [...BASE_NAV_LINKS, { href: "/admin/users", label: "ผู้ใช้" }]
+    : BASE_NAV_LINKS;
 
   const handleLogout = async () => {
     const token = getAccessToken();

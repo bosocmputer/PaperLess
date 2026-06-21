@@ -150,6 +150,16 @@ func main() {
 	v1.GET("/users", requireAuth,
 		middleware.RequireRole("workflow_admin", "system_admin"), userH.List)
 
+	// User management (Phase C) — system_admin only. Separate /admin/users path so
+	// it does not collide with the broader-guarded /users above.
+	adminUsersG := v1.Group("/admin/users", requireAuth, middleware.RequireRole("system_admin"))
+	{
+		adminUsersG.GET("", userH.AdminList)
+		adminUsersG.POST("", userH.Create)
+		adminUsersG.PUT("/:id", userH.Update)
+	}
+	v1.GET("/roles", requireAuth, middleware.RequireRole("system_admin"), userH.ListRoles)
+
 	// Standalone attachment delete (by file id, not doc id)
 	v1.DELETE("/attachments/:id", requireAuth, attachH.Delete)
 
