@@ -6,6 +6,14 @@ import { api } from "@/lib/api";
 import { saveSession } from "@/lib/auth";
 import { Button, Card, Input } from "@/components/ui";
 
+// Roles that land on the admin dashboard rather than the signer inbox.
+// Keep in sync with the root redirect (src/app/page.tsx).
+const ADMIN_ROLES = ["system_admin", "workflow_admin", "document_admin", "auditor"];
+
+function landingFor(roles: string[]): string {
+  return roles.some((r) => ADMIN_ROLES.includes(r)) ? "/admin/documents" : "/inbox";
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState("");
@@ -26,7 +34,8 @@ export default function LoginPage() {
         return;
       }
       saveSession(result.data.access_token, result.data.refresh_token, result.data.user);
-      router.replace("/inbox");
+      // Role-based landing: admins/auditors → dashboard, signers → inbox.
+      router.replace(landingFor(result.data.user.roles ?? []));
     } catch {
       setError("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้");
     } finally {
