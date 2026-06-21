@@ -42,12 +42,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="min-h-screen flex flex-col">
       {/* Top nav */}
-      <nav className="bg-white border-b border-gray-200 sticky top-0 z-20">
+      <nav className="bg-surface border-b border-line sticky top-0 z-20">
         <div className="max-w-3xl mx-auto px-4 py-0 flex items-center gap-1 h-12">
           {/* Logo / brand */}
-          <span className="text-sm font-bold text-blue-700 mr-3 flex-shrink-0">PaperLess</span>
+          <span className="text-sm font-bold text-brand-700 mr-3 flex-shrink-0 tracking-tight">PaperLess</span>
 
           {/* Nav links */}
           <div className="flex items-center gap-1 flex-1 overflow-x-auto scrollbar-none">
@@ -58,10 +58,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   key={link.href}
                   type="button"
                   onClick={() => router.push(link.href)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors ${
                     active
-                      ? "bg-blue-50 text-blue-700"
-                      : "text-gray-600 hover:bg-gray-100"
+                      ? "bg-brand-50 text-brand-700"
+                      : "text-muted hover:bg-surface-muted"
                   }`}
                 >
                   {link.label}
@@ -73,7 +73,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           {/* User info + logout */}
           <div className="flex items-center gap-2 flex-shrink-0 ml-2">
             {displayName && (
-              <span className="text-xs text-gray-500 hidden sm:inline max-w-[100px] truncate">
+              <span className="text-xs text-muted hidden sm:inline max-w-[100px] truncate">
                 {displayName}
               </span>
             )}
@@ -81,7 +81,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               type="button"
               onClick={handleLogout}
               disabled={loggingOut}
-              className="text-xs text-gray-500 px-2 py-1 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40"
+              className="text-xs text-muted px-2 py-1 border border-line rounded-md hover:bg-surface-muted disabled:opacity-40"
             >
               {loggingOut ? "..." : "ออกจากระบบ"}
             </button>

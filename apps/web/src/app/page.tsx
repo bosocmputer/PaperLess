@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getAccessToken, getUser } from "@/lib/auth";
+import { Spinner } from "@/components/ui";
 
 const ADMIN_ROLES = ["system_admin", "workflow_admin", "document_admin", "auditor"];
 
@@ -28,8 +29,8 @@ export default function RootPage() {
   }, [router]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+    <div className="min-h-screen flex items-center justify-center text-brand">
+      <Spinner size="md" />
     </div>
   );
 }

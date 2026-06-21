@@ -7,6 +7,7 @@ import { getAccessToken, getUser } from "@/lib/auth";
 import ErrorState from "@/components/ErrorState";
 import SignaturePad from "@/components/SignaturePad";
 import WorkflowProgress from "@/components/WorkflowProgress";
+import { Button, Card, Input, Spinner, StatusBadge } from "@/components/ui";
 
 interface PageProps {
   params: { id: string };
@@ -34,6 +35,26 @@ type ModalState =
 
 function isAdmin(roles: string[]): boolean {
   return roles.includes("document_admin") || roles.includes("system_admin");
+}
+
+// Shared sticky page header with a back action.
+function PageHeader({ title, subtitle, onBack }: { title: string; subtitle?: string; onBack: () => void }) {
+  return (
+    <header className="bg-surface border-b border-line px-4 py-3 sticky top-0 z-10">
+      <div className="max-w-lg mx-auto w-full flex items-center gap-3">
+        <button
+          onClick={onBack}
+          className="touch-target -ml-2 px-2 text-sm font-medium text-brand-700 flex-shrink-0 rounded-md"
+        >
+          ← กลับ
+        </button>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-base font-bold text-ink truncate">{title}</h1>
+          {subtitle && <p className="text-xs text-muted">{subtitle}</p>}
+        </div>
+      </div>
+    </header>
+  );
 }
 
 // ── Admin view component ──────────────────────────────────────────────────────
@@ -150,27 +171,12 @@ function AdminDocView({
     void result; // suppress unused warning
   };
 
-  // Must match the external_signers.status CHECK constraint (0001_init.up.sql):
-  // ('pending','signed','expired','cancelled'). No 'active' value exists.
-  const statusLabel: Record<string, string> = {
-    pending: "รอเซ็น",
-    signed: "เซ็นแล้ว",
-    expired: "หมดอายุ",
-    cancelled: "ยกเลิก",
-  };
+  const submitting = modal.open && modal.phase === "submitting";
 
   return (
     <>
-      <main className="min-h-screen bg-gray-50 flex flex-col">
-        <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
-          <div className="flex items-center gap-3">
-            <button onClick={onBack} className="text-blue-600 text-sm flex-shrink-0">← กลับ</button>
-            <div className="flex-1 min-w-0">
-              <h1 className="text-base font-bold text-gray-900 truncate">{docFormatCode} — {docNo}</h1>
-              <p className="text-xs text-gray-500">จัดการเอกสาร</p>
-            </div>
-          </div>
-        </header>
+      <main className="min-h-screen flex flex-col">
+        <PageHeader title={`${docFormatCode} — ${docNo}`} subtitle="จัดการเอกสาร" onBack={onBack} />
 
         <div className="max-w-lg mx-auto w-full px-4 py-4 flex flex-col gap-4">
           {/* Workflow progress */}
@@ -178,50 +184,39 @@ function AdminDocView({
 
           {/* Invite button — shown only when there's a waiting external task */}
           {canInvite && hasWaitingExternal && (
-            <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <p className="text-sm font-medium text-gray-700 mb-1">ผู้เซ็นภายนอก</p>
-              <p className="text-xs text-gray-500 mb-3">เชิญผู้เซ็นที่ไม่ได้อยู่ในระบบมาเซ็นเอกสาร</p>
-              <button
-                onClick={openModal}
-                className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium active:scale-95"
-              >
-                เชิญผู้เซ็นภายนอก
-              </button>
-            </div>
+            <Card className="flex flex-col gap-3">
+              <div>
+                <p className="text-sm font-semibold text-ink">ผู้เซ็นภายนอก</p>
+                <p className="text-xs text-muted mt-0.5">เชิญผู้เซ็นที่ไม่ได้อยู่ในระบบมาเซ็นเอกสาร</p>
+              </div>
+              <Button onClick={openModal} block>เชิญผู้เซ็นภายนอก</Button>
+            </Card>
           )}
 
           {/* Existing signers list */}
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <p className="text-sm font-medium text-gray-700 mb-3">รายชื่อผู้เซ็นภายนอก</p>
+          <Card>
+            <p className="text-sm font-semibold text-ink mb-3">รายชื่อผู้เซ็นภายนอก</p>
             {signersLoading ? (
-              <div className="flex justify-center py-4">
-                <div className="w-6 h-6 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
+              <div className="flex justify-center py-4 text-brand">
+                <Spinner size="sm" />
               </div>
             ) : signers.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4">ยังไม่มีผู้เซ็นภายนอก</p>
+              <p className="text-sm text-subtle text-center py-4">ยังไม่มีผู้เซ็นภายนอก</p>
             ) : (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col">
                 {signers.map((s) => (
-                  <div key={s.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
-                    <div>
-                      <p className="text-sm font-medium text-gray-800">{s.name}</p>
-                      {s.email && <p className="text-xs text-gray-500">{s.email}</p>}
-                      {s.phone && <p className="text-xs text-gray-500">{s.phone}</p>}
+                  <div key={s.id} className="flex items-center justify-between gap-2 py-2.5 border-b border-line last:border-0">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-ink truncate">{s.name}</p>
+                      {s.email && <p className="text-xs text-muted truncate">{s.email}</p>}
+                      {s.phone && <p className="text-xs text-muted">{s.phone}</p>}
                     </div>
-                    <span className={`text-xs px-2 py-1 rounded-full flex-shrink-0 ${
-                      s.status === "signed"
-                        ? "bg-green-100 text-green-700"
-                        : s.status === "expired" || s.status === "cancelled"
-                        ? "bg-gray-100 text-gray-500"
-                        : "bg-amber-100 text-amber-700"
-                    }`}>
-                      {statusLabel[s.status] ?? s.status}
-                    </span>
+                    <StatusBadge kind="signer" status={s.status} />
                   </div>
                 ))}
               </div>
             )}
-          </div>
+          </Card>
         </div>
       </main>
 
@@ -229,140 +224,113 @@ function AdminDocView({
       {modal.open && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={modal.phase === "success" ? closeModal : undefined} />
-          <div className="relative bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto shadow-xl">
+          <div className="relative bg-surface rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto shadow-pop">
 
             {modal.phase === "form" || modal.phase === "submitting" ? (
               <div className="p-5 flex flex-col gap-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-base font-bold text-gray-900">เชิญผู้เซ็นภายนอก</h2>
-                  <button onClick={closeModal} className="text-gray-400 text-xl leading-none">×</button>
+                  <h2 className="text-base font-bold text-ink">เชิญผู้เซ็นภายนอก</h2>
+                  <button onClick={closeModal} className="text-subtle text-2xl leading-none touch-target -mr-2 px-2">×</button>
                 </div>
 
                 <div className="flex flex-col gap-3">
-                  <div>
-                    <label className="text-xs font-medium text-gray-600 block mb-1">ชื่อ <span className="text-red-500">*</span></label>
-                    <input
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="ชื่อ-นามสกุล"
-                      maxLength={200}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      disabled={modal.phase === "submitting"}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-600 block mb-1">อีเมล (ไม่บังคับ)</label>
-                    <input
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="example@email.com"
-                      type="email"
-                      maxLength={254}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      disabled={modal.phase === "submitting"}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-600 block mb-1">เบอร์โทร (ไม่บังคับ)</label>
-                    <input
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="0812345678"
-                      type="tel"
-                      maxLength={20}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      disabled={modal.phase === "submitting"}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-600 block mb-1">หมดอายุใน (ชั่วโมง)</label>
-                    <input
-                      value={expiresHours}
-                      onChange={(e) => setExpiresHours(e.target.value)}
-                      type="number"
-                      min={1}
-                      max={168}
-                      placeholder="72"
-                      title="จำนวนชั่วโมงที่ลิงก์จะหมดอายุ (1–168)"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      disabled={modal.phase === "submitting"}
-                    />
-                    <p className="text-xs text-gray-400 mt-1">ค่าเริ่มต้น 72 ชั่วโมง (3 วัน) — สูงสุด 168 ชั่วโมง (7 วัน)</p>
-                  </div>
+                  <Input
+                    label="ชื่อ *"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="ชื่อ-นามสกุล"
+                    maxLength={200}
+                    disabled={submitting}
+                  />
+                  <Input
+                    label="อีเมล (ไม่บังคับ)"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="example@email.com"
+                    type="email"
+                    maxLength={254}
+                    disabled={submitting}
+                  />
+                  <Input
+                    label="เบอร์โทร (ไม่บังคับ)"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="0812345678"
+                    type="tel"
+                    maxLength={20}
+                    disabled={submitting}
+                  />
+                  <Input
+                    label="หมดอายุใน (ชั่วโมง)"
+                    value={expiresHours}
+                    onChange={(e) => setExpiresHours(e.target.value)}
+                    type="number"
+                    min={1}
+                    max={168}
+                    placeholder="72"
+                    hint="ค่าเริ่มต้น 72 ชั่วโมง (3 วัน) — สูงสุด 168 ชั่วโมง (7 วัน)"
+                    disabled={submitting}
+                  />
                 </div>
 
                 {inviteError && (
-                  <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{inviteError}</p>
+                  <p className="text-xs text-danger-fg bg-danger-bg rounded-md px-3 py-2">{inviteError}</p>
                 )}
 
-                <button
-                  onClick={handleInvite}
-                  disabled={modal.phase === "submitting" || !name.trim()}
-                  className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-40 active:scale-95"
-                >
-                  {modal.phase === "submitting" ? "กำลังสร้างลิงก์..." : "สร้างลิงก์เชิญ"}
-                </button>
+                <Button onClick={handleInvite} disabled={!name.trim()} loading={submitting} block>
+                  {submitting ? "กำลังสร้างลิงก์..." : "สร้างลิงก์เชิญ"}
+                </Button>
               </div>
             ) : (
               // Success — show token once
               <div className="p-5 flex flex-col gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">✅</span>
+                <div className="flex items-center gap-3">
+                  <span className="flex items-center justify-center w-10 h-10 rounded-full bg-success-bg text-success-fg text-xl">✓</span>
                   <div>
-                    <h2 className="text-base font-bold text-gray-900">สร้างลิงก์สำเร็จ</h2>
-                    <p className="text-xs text-gray-500">สำหรับ {modal.result.name}</p>
+                    <h2 className="text-base font-bold text-ink">สร้างลิงก์สำเร็จ</h2>
+                    <p className="text-xs text-muted">สำหรับ {modal.result.name}</p>
                   </div>
                 </div>
 
-                <div className="bg-red-50 border border-red-200 rounded-xl p-3">
-                  <p className="text-xs font-semibold text-red-700 mb-1">⚠ คัดลอกเดี๋ยวนี้ — จะไม่แสดงอีก</p>
-                  <p className="text-xs text-red-600">ระบบจะไม่สามารถแสดงโทเคนหรือลิงก์นี้ซ้ำได้อีก</p>
+                <div className="bg-danger-bg border border-danger/30 rounded-md p-3">
+                  <p className="text-xs font-semibold text-danger-fg mb-1">⚠ คัดลอกเดี๋ยวนี้ — จะไม่แสดงอีก</p>
+                  <p className="text-xs text-danger-fg">ระบบจะไม่สามารถแสดงโทเคนหรือลิงก์นี้ซ้ำได้อีก</p>
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <p className="text-xs font-medium text-gray-600">ลิงก์เซ็นเอกสาร</p>
-                  <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs font-mono text-gray-700 break-all">
+                  <p className="text-xs font-medium text-muted">ลิงก์เซ็นเอกสาร</p>
+                  <div className="bg-surface-muted rounded-md px-3 py-2 text-xs font-mono text-ink break-all">
                     {window.location.origin}/external/{tokenRef.current}
                   </div>
-                  <button
+                  <Button
                     onClick={() => copyLink(modal.result)}
-                    className={`w-full py-2.5 rounded-lg text-sm font-medium active:scale-95 ${
-                      linkCopied
-                        ? "bg-green-600 text-white"
-                        : "bg-blue-600 text-white"
-                    }`}
+                    className={linkCopied ? "bg-success hover:bg-success" : undefined}
+                    block
                   >
                     {linkCopied ? "คัดลอกลิงก์แล้ว ✓" : "คัดลอกลิงก์"}
-                  </button>
+                  </Button>
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <p className="text-xs font-medium text-gray-600">โทเคน (สำหรับ API โดยตรง)</p>
-                  <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs font-mono text-gray-700 break-all">
+                  <p className="text-xs font-medium text-muted">โทเคน (สำหรับ API โดยตรง)</p>
+                  <div className="bg-surface-muted rounded-md px-3 py-2 text-xs font-mono text-ink break-all">
                     {tokenRef.current}
                   </div>
-                  <button
+                  <Button
                     onClick={copyToken}
-                    className={`w-full py-2 rounded-lg text-sm active:scale-95 ${
-                      tokenCopied
-                        ? "bg-green-100 text-green-700 border border-green-300"
-                        : "bg-gray-100 text-gray-700 border border-gray-300"
-                    }`}
+                    variant={tokenCopied ? "secondary" : "outline"}
+                    size="sm"
+                    block
                   >
                     {tokenCopied ? "คัดลอกโทเคนแล้ว ✓" : "คัดลอกโทเคน"}
-                  </button>
+                  </Button>
                 </div>
 
-                <p className="text-xs text-gray-500 text-center">
+                <p className="text-xs text-muted text-center">
                   หมดอายุ: {new Date(modal.result.expires_at).toLocaleString("th-TH")}
                 </p>
 
-                <button
-                  onClick={closeModal}
-                  className="w-full py-2.5 border border-gray-300 rounded-lg text-sm text-gray-700 active:scale-95"
-                >
-                  ปิด
-                </button>
+                <Button onClick={closeModal} variant="outline" block>ปิด</Button>
               </div>
             )}
           </div>
@@ -519,17 +487,17 @@ export default function DocumentPage({ params }: PageProps) {
 
   if (state.stage === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen flex items-center justify-center text-brand">
+        <Spinner size="md" />
       </div>
     );
   }
 
   if (state.stage === "error") {
     return (
-      <main className="min-h-screen bg-gray-50 flex flex-col">
-        <header className="bg-white border-b border-gray-200 px-4 py-4">
-          <button onClick={() => router.back()} className="text-blue-600 text-sm">← กลับ</button>
+      <main className="min-h-screen flex flex-col">
+        <header className="bg-surface border-b border-line px-4 py-3">
+          <button onClick={() => router.back()} className="touch-target -ml-2 px-2 text-sm font-medium text-brand-700 rounded-md">← กลับ</button>
         </header>
         <div className="flex-1 flex items-center justify-center">
           <ErrorState code={state.code} onRetry={state.code === "network_error" ? load : undefined} />
@@ -553,51 +521,42 @@ export default function DocumentPage({ params }: PageProps) {
 
   if (state.stage === "done") {
     return (
-      <main className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4 px-4">
-        <div className="text-5xl">✅</div>
-        <p className="text-lg font-semibold text-gray-800">{state.message}</p>
-        <button onClick={() => router.replace("/inbox")} className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium">
-          กลับไปกล่องเอกสาร
-        </button>
+      <main className="min-h-screen flex flex-col items-center justify-center gap-4 px-4 text-center">
+        <div className="flex items-center justify-center w-16 h-16 rounded-full bg-success-bg text-success-fg text-3xl">✓</div>
+        <p className="text-lg font-semibold text-ink">{state.message}</p>
+        <Button onClick={() => router.replace("/inbox")} size="lg">กลับไปกล่องเอกสาร</Button>
       </main>
     );
   }
 
   if (state.stage === "submitting") {
     return (
-      <main className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4 px-4">
-        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm text-gray-600">{submittingStatus}</p>
+      <main className="min-h-screen flex flex-col items-center justify-center gap-4 px-4 text-brand">
+        <Spinner size="lg" />
+        <p className="text-sm text-muted">{submittingStatus}</p>
       </main>
     );
   }
 
   if (state.stage === "rejecting") {
     return (
-      <main className="min-h-screen bg-gray-50 flex flex-col">
-        <header className="bg-white border-b border-gray-200 px-4 py-4 flex items-center gap-3">
-          <button onClick={() => setState({ ...(state as typeof state), stage: "viewing" } as PageState)} className="text-blue-600 text-sm">← กลับ</button>
-          <h1 className="text-base font-bold text-gray-900">ส่งคืนเอกสาร</h1>
-        </header>
+      <main className="min-h-screen flex flex-col">
+        <PageHeader title="ส่งคืนเอกสาร" onBack={() => setState({ ...(state as typeof state), stage: "viewing" } as PageState)} />
         <div className="max-w-lg mx-auto w-full px-4 py-6 flex flex-col gap-4">
-          <p className="text-sm text-gray-600">กรุณาระบุเหตุผลในการส่งคืนเอกสาร</p>
+          <p className="text-sm text-muted">กรุณาระบุเหตุผลในการส่งคืนเอกสาร</p>
           <textarea
             value={rejectReason}
             onChange={(e) => setRejectReason(e.target.value)}
             placeholder="เหตุผล..."
             rows={4}
-            className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-400"
+            className="w-full border border-line-strong rounded-md px-3 py-2 text-sm bg-surface text-ink placeholder:text-subtle focus:outline-none focus:ring-2 focus:ring-offset-1 focus:border-danger"
           />
           {!rejectReason.trim() && (
-            <p className="text-xs text-red-500">กรุณาระบุเหตุผล</p>
+            <p className="text-xs text-danger-fg">กรุณาระบุเหตุผล</p>
           )}
-          <button
-            onClick={handleReject}
-            disabled={!rejectReason.trim()}
-            className="py-2.5 bg-red-600 text-white rounded-lg text-sm font-medium disabled:opacity-40 active:scale-95"
-          >
+          <Button onClick={handleReject} disabled={!rejectReason.trim()} variant="danger" block>
             ยืนยันการส่งคืน
-          </button>
+          </Button>
         </div>
       </main>
     );
@@ -608,24 +567,20 @@ export default function DocumentPage({ params }: PageProps) {
   const pdfSrc = `${api.originalPdfUrl(state.docId)}?token=${encodeURIComponent(token)}`;
 
   return (
-    <main className="min-h-screen bg-gray-50 flex flex-col">
-      <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-0 z-10">
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.back()} className="text-blue-600 text-sm flex-shrink-0">← กลับ</button>
-          <div className="flex-1 min-w-0">
-            <h1 className="text-base font-bold text-gray-900 truncate">{state.docFormatCode} — {state.docNo}</h1>
-            <p className="text-xs text-gray-500">ขั้นที่ {state.seqNo} จาก {state.steps.length}</p>
-          </div>
-        </div>
-      </header>
+    <main className="min-h-screen flex flex-col">
+      <PageHeader
+        title={`${state.docFormatCode} — ${state.docNo}`}
+        subtitle={`ขั้นที่ ${state.seqNo} จาก ${state.steps.length}`}
+        onBack={() => router.back()}
+      />
 
       <div className="max-w-lg mx-auto w-full px-4 py-4 flex flex-col gap-4">
         {/* Workflow progress */}
         <WorkflowProgress steps={state.steps} currentSeq={state.seqNo} />
 
         {/* PDF viewer */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <p className="text-xs font-medium text-gray-500 px-3 pt-3 pb-1">เอกสาร</p>
+        <Card padding="none" className="overflow-hidden">
+          <p className="text-xs font-semibold text-muted px-3 pt-3 pb-1">เอกสาร</p>
           {pdfError ? (
             <div className="px-3 pb-3">
               <ErrorState code="pdf_preview_failed" />
@@ -633,7 +588,7 @@ export default function DocumentPage({ params }: PageProps) {
                 href={pdfSrc}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block text-center text-sm text-blue-600 underline mt-2"
+                className="block text-center text-sm text-brand-700 underline mt-2"
               >
                 ดาวน์โหลด PDF
               </a>
@@ -647,45 +602,43 @@ export default function DocumentPage({ params }: PageProps) {
               onError={() => setPdfError(true)}
             />
           )}
-        </div>
+        </Card>
 
         {/* Signature section */}
         {!isSigning ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-4 flex flex-col gap-3">
-            <p className="text-sm font-medium text-gray-700">ลายเซ็น</p>
+          <Card className="flex flex-col gap-3">
+            <p className="text-sm font-semibold text-ink">ลายเซ็น</p>
             <SignaturePad
               onSign={handleSign}
               disabled={false}
             />
             <button
               onClick={() => setState({ stage: "rejecting", taskId: state.taskId })}
-              className="text-sm text-red-600 underline text-center mt-1"
+              className="text-sm text-danger-fg underline text-center mt-1 touch-target"
             >
               ส่งคืนเอกสาร
             </button>
-          </div>
+          </Card>
         ) : (
-          <div className="bg-white rounded-xl border border-blue-200 p-4 flex flex-col gap-3">
-            <p className="text-sm font-medium text-gray-700">ตรวจสอบและยืนยัน</p>
-            <p className="text-xs text-gray-500">ลายเซ็นของคุณถูกบันทึกแล้ว กดยืนยันเพื่อส่งข้อมูล</p>
+          <Card className="flex flex-col gap-3 border-brand-200">
+            <p className="text-sm font-semibold text-ink">ตรวจสอบและยืนยัน</p>
+            <p className="text-xs text-muted">ลายเซ็นของคุณถูกบันทึกแล้ว กดยืนยันเพื่อส่งข้อมูล</p>
             <div className="flex gap-2">
-              <button
+              <Button
+                variant="outline"
+                block
                 onClick={() => {
                   signatureRef.current = null;
                   setState({ stage: "viewing", taskId: state.taskId, docId: state.docId, docNo: state.docNo, docFormatCode: state.docFormatCode, seqNo: state.seqNo, steps: state.steps });
                 }}
-                className="flex-1 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-700 active:scale-95"
               >
                 วาดใหม่
-              </button>
-              <button
-                onClick={handleSubmit}
-                className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium active:scale-95"
-              >
+              </Button>
+              <Button block onClick={handleSubmit}>
                 ยืนยันเซ็นเอกสาร
-              </button>
+              </Button>
             </div>
-          </div>
+          </Card>
         )}
       </div>
     </main>

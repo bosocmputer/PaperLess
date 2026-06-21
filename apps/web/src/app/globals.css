@@ -2,26 +2,86 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  PaperLess Design System — "Trust & Calm"
+  Source of truth: docs/design-system.md
+  All colors flow through these tokens; never hard-code hex in components.
+  Light theme only for now; a dark theme would be a second [data-theme] block here.
+*/
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Brand — navy/slate, conveys trust for a legal e-signature product */
+  --brand-50: #eef3fb;
+  --brand-100: #d9e3f5;
+  --brand-200: #b3c6ea;
+  --brand-300: #8aa6db;
+  --brand-400: #5e80c6;
+  --brand-500: #3d5fa8;
+  --brand-600: #2e498a; /* primary */
+  --brand-700: #26396b;
+  --brand-800: #1f2d52;
+  --brand-900: #17223e;
+
+  /* Neutrals / text */
+  --ink: #0f172a;        /* primary text */
+  --muted: #475569;      /* secondary text */
+  --subtle: #94a3b8;     /* tertiary / placeholder */
+
+  /* Surfaces */
+  --bg: #f6f8fb;             /* page background — calm off-white */
+  --surface: #ffffff;        /* cards, sheets */
+  --surface-muted: #f1f5f9;  /* sunken areas, inputs, table headers */
+
+  /* Lines */
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+
+  /* Semantic tones (DEFAULT = solid, -bg = soft fill, -fg = text on soft fill) */
+  --success: #15803d;
+  --success-bg: #dcfce7;
+  --success-fg: #166534;
+
+  --warning: #b45309;
+  --warning-bg: #fef3c7;
+  --warning-fg: #92400e;
+
+  --danger: #b91c1c;
+  --danger-bg: #fee2e2;
+  --danger-fg: #991b1b;
+
+  --info: var(--brand-600);
+  --info-bg: var(--brand-50);
+  --info-fg: var(--brand-700);
+
+  /* Focus ring */
+  --ring: #5e80c6;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
   }
-}
-
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    /* Sarabun (loaded via next/font in layout.tsx) reads well in Thai at a
+       generous line-height; keep it comfortable for dense legal documents. */
+    font-family: var(--font-sans), system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.6;
+  }
+  /* Visible, consistent keyboard focus across the app */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  /* iOS-friendly minimum touch target (44px). Apply to any tappable control. */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
   }
 }
