@@ -321,9 +321,10 @@ func (h *UserHandler) Create(c *gin.Context) {
 		}
 	}
 
+	// entity_type must be one of the audit_logs CHECK values; user admin is 'config'.
 	_, _ = tx.Exec(ctx, `
 		INSERT INTO audit_logs (actor_type, actor_id, action, entity_type, entity_id)
-		VALUES ('user', $1, 'user_created', 'user', $2)
+		VALUES ('user', $1, 'user_created', 'config', $2)
 	`, strconv.FormatInt(claims.UserID, 10), strconv.FormatInt(newID, 10))
 
 	if err := tx.Commit(ctx); err != nil {
@@ -463,7 +464,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 
 	_, _ = tx.Exec(ctx, `
 		INSERT INTO audit_logs (actor_type, actor_id, action, entity_type, entity_id)
-		VALUES ('user', $1, 'user_updated', 'user', $2)
+		VALUES ('user', $1, 'user_updated', 'config', $2)
 	`, strconv.FormatInt(claims.UserID, 10), strconv.FormatInt(userID, 10))
 
 	if err := tx.Commit(ctx); err != nil {
