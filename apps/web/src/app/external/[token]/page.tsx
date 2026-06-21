@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { api, ExternalDocView } from "@/lib/api";
 import SignaturePad from "@/components/SignaturePad";
 import ErrorState from "@/components/ErrorState";
+import { Button, Card, Spinner } from "@/components/ui";
 
 type Stage =
   | "loading"
@@ -123,10 +124,10 @@ export default function ExternalSignPage() {
 
   if (stage === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-gray-600 text-sm">กำลังโหลด...</p>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center text-brand">
+          <Spinner size="lg" className="mx-auto mb-3" />
+          <p className="text-muted text-sm">กำลังโหลด...</p>
         </div>
       </div>
     );
@@ -135,25 +136,20 @@ export default function ExternalSignPage() {
   if (stage === "error") {
     if (errorCode === "network_error") {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+        <div className="min-h-screen flex items-center justify-center px-4">
           <div className="text-center max-w-sm">
-            <div className="text-4xl mb-3">📶</div>
-            <p className="text-lg font-medium text-gray-800 mb-2">กำลังตรวจสอบสถานะ</p>
-            <p className="text-sm text-gray-500 mb-4">
+            <div className="flex items-center justify-center w-14 h-14 rounded-full bg-info-bg text-info-fg text-2xl mx-auto mb-3">⟳</div>
+            <p className="text-lg font-semibold text-ink mb-2">กำลังตรวจสอบสถานะ</p>
+            <p className="text-sm text-muted mb-4">
               การเชื่อมต่อขัดข้องระหว่างการส่งข้อมูล เอกสารอาจได้รับการเซ็นแล้ว
             </p>
-            <button
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm"
-            >
-              ตรวจสอบสถานะ
-            </button>
+            <Button onClick={() => window.location.reload()}>ตรวจสอบสถานะ</Button>
           </div>
         </div>
       );
     }
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="min-h-screen flex items-center justify-center px-4">
         <div className="w-full max-w-sm">
           <ErrorState code={errorCode} />
         </div>
@@ -163,11 +159,11 @@ export default function ExternalSignPage() {
 
   if (stage === "done") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="min-h-screen flex items-center justify-center px-4">
         <div className="text-center max-w-sm">
-          <div className="text-5xl mb-4">✅</div>
-          <h1 className="text-xl font-bold text-gray-800 mb-2">เซ็นเอกสารสำเร็จ</h1>
-          <p className="text-sm text-gray-500">
+          <div className="flex items-center justify-center w-16 h-16 rounded-full bg-success-bg text-success-fg text-3xl mx-auto mb-4">✓</div>
+          <h1 className="text-xl font-bold text-ink mb-2">เซ็นเอกสารสำเร็จ</h1>
+          <p className="text-sm text-muted">
             ลายเซ็นของคุณได้รับการบันทึกแล้ว ขอบคุณที่ดำเนินการ
           </p>
         </div>
@@ -176,16 +172,16 @@ export default function ExternalSignPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-4 py-3 sticky top-0 z-10">
+      <div className="bg-surface border-b border-line px-4 py-3 sticky top-0 z-10">
         <div className="max-w-lg mx-auto">
-          <p className="text-xs text-gray-400 uppercase tracking-wide">PaperLess</p>
-          <h1 className="text-base font-semibold text-gray-900">
+          <p className="text-xs font-semibold text-brand-600 uppercase tracking-widest">PaperLess</p>
+          <h1 className="text-base font-semibold text-ink">
             {docView ? `${docView.doc_format_code} ${docView.doc_no}` : "เซ็นเอกสาร"}
           </h1>
           {docView && (
-            <p className="text-xs text-gray-500">สวัสดี คุณ{docView.signer_name}</p>
+            <p className="text-xs text-muted">สวัสดี คุณ{docView.signer_name}</p>
           )}
         </div>
       </div>
@@ -195,14 +191,14 @@ export default function ExternalSignPage() {
         {/* PDF Viewer */}
         {stage === "view" && (
           <>
-            <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-100">
-                <p className="text-sm font-medium text-gray-700">เอกสารที่ต้องเซ็น</p>
+            <Card padding="none" className="overflow-hidden">
+              <div className="px-4 py-3 border-b border-line">
+                <p className="text-sm font-semibold text-ink">เอกสารที่ต้องเซ็น</p>
               </div>
               {pdfObjectUrl ? (
                 <iframe
                   src={pdfObjectUrl}
-                  className="w-full"
+                  className="w-full border-0"
                   style={{ height: "60vh" }}
                   title="document preview"
                 />
@@ -211,88 +207,75 @@ export default function ExternalSignPage() {
                   <ErrorState code="pdf_preview_failed" />
                 </div>
               ) : (
-                <div className="flex items-center justify-center" style={{ height: "60vh" }}>
-                  <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                <div className="flex items-center justify-center text-brand" style={{ height: "60vh" }}>
+                  <Spinner size="md" />
                 </div>
               )}
-            </div>
+            </Card>
 
-            <button
-              onClick={() => setStage("signing")}
-              className="w-full py-3 bg-blue-600 text-white font-medium rounded-xl active:scale-95 transition-transform"
-            >
+            <Button onClick={() => setStage("signing")} size="lg" block>
               ดำเนินการเซ็น
-            </button>
+            </Button>
           </>
         )}
 
         {/* Signature Pad */}
         {stage === "signing" && (
-          <div className="bg-white rounded-xl shadow-sm p-4 space-y-3">
+          <Card className="space-y-3">
             <div>
-              <p className="text-sm font-medium text-gray-700 mb-1">วาดลายเซ็น</p>
-              <p className="text-xs text-gray-400">ลายเซ็นของคุณจะถูกบันทึกอย่างปลอดภัย</p>
+              <p className="text-sm font-semibold text-ink mb-1">วาดลายเซ็น</p>
+              <p className="text-xs text-subtle">ลายเซ็นของคุณจะถูกบันทึกอย่างปลอดภัย</p>
             </div>
             <SignaturePad onSign={handleSign} />
-            <button
-              onClick={() => setStage("view")}
-              className="w-full py-2 text-sm text-gray-500 border border-gray-200 rounded-lg"
-            >
+            <Button onClick={() => setStage("view")} variant="outline" block>
               ย้อนกลับ
-            </button>
-          </div>
+            </Button>
+          </Card>
         )}
 
         {/* Preview + Consent */}
         {stage === "preview" && (
           <div className="space-y-4">
-            <div className="bg-white rounded-xl shadow-sm p-4">
+            <Card>
               <div className="flex items-center gap-2 mb-3">
-                <span className="text-green-500 text-xl">✓</span>
-                <p className="text-sm font-medium text-gray-700">ลายเซ็นพร้อมส่ง</p>
+                <span className="flex items-center justify-center w-7 h-7 rounded-full bg-success-bg text-success-fg text-sm">✓</span>
+                <p className="text-sm font-semibold text-ink">ลายเซ็นพร้อมส่ง</p>
               </div>
-              <p className="text-xs font-mono text-gray-400 break-all">
+              <p className="text-xs font-mono text-subtle break-all">
                 {signing.signatureHash.slice(0, 32)}...
               </p>
-            </div>
+            </Card>
 
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <p className="text-xs text-gray-600 leading-relaxed">{CONSENT_TEXT}</p>
+            <div className="bg-warning-bg border border-warning/30 rounded-lg p-4">
+              <p className="text-xs text-ink leading-relaxed">{CONSENT_TEXT}</p>
               <label className="flex items-start gap-2 mt-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={signing.consentAgreed}
                   onChange={(e) => setSigning((s) => ({ ...s, consentAgreed: e.target.checked }))}
-                  className="mt-0.5 w-4 h-4 rounded border-gray-300 accent-blue-600"
+                  className="mt-0.5 w-4 h-4 rounded border-line-strong accent-brand-600"
                 />
-                <span className="text-sm text-gray-700">
+                <span className="text-sm text-ink">
                   ฉันยอมรับเงื่อนไขและให้ความยินยอมในการลงลายมือชื่ออิเล็กทรอนิกส์
                 </span>
               </label>
             </div>
 
             <div className="flex gap-3">
-              <button
-                onClick={() => setStage("signing")}
-                className="flex-1 py-3 border border-gray-300 text-gray-600 rounded-xl text-sm"
-              >
+              <Button onClick={() => setStage("signing")} variant="outline" block>
                 แก้ไขลายเซ็น
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={!signing.consentAgreed}
-                className="flex-1 py-3 bg-blue-600 text-white font-medium rounded-xl text-sm disabled:opacity-40 active:scale-95 transition-transform"
-              >
+              </Button>
+              <Button onClick={handleSubmit} disabled={!signing.consentAgreed} block>
                 ยืนยันการเซ็น
-              </button>
+              </Button>
             </div>
           </div>
         )}
 
         {stage === "submitting" && (
-          <div className="flex flex-col items-center justify-center py-16 gap-3">
-            <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-            <p className="text-gray-600 text-sm">กำลังบันทึกลายเซ็น...</p>
+          <div className="flex flex-col items-center justify-center py-16 gap-3 text-brand">
+            <Spinner size="lg" />
+            <p className="text-muted text-sm">กำลังบันทึกลายเซ็น...</p>
           </div>
         )}
       </div>

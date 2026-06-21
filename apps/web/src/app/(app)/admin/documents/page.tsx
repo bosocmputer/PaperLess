@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api, type DocumentRow } from "@/lib/api";
 import { getAccessToken, getUser } from "@/lib/auth";
 import ErrorState from "@/components/ErrorState";
+import { Button, Card, CardButton, Input, Spinner, StatusBadge } from "@/components/ui";
 
 interface ImportForm {
   file: File | null;
@@ -22,8 +23,9 @@ const IMPORT_FORM_INIT: ImportForm = {
   amount: "",
 };
 
-// Document status labels — pinned to documents.status CHECK (0001_init.up.sql):
-// imported,pending,rejected,completed,cancelled
+// Document status labels for the filter dropdown — pinned to documents.status
+// CHECK (0001_init.up.sql): imported,pending,rejected,completed,cancelled.
+// Row badges use the shared <StatusBadge kind="document"> (same wording).
 const DOC_STATUS_LABELS: Record<string, string> = {
   imported:  "นำเข้าแล้ว",
   pending:   "รอเซ็น",
@@ -34,20 +36,13 @@ const DOC_STATUS_LABELS: Record<string, string> = {
 
 const DOC_STATUS_OPTIONS = ["", "imported", "pending", "rejected", "completed", "cancelled"];
 
-function statusBadge(status: string) {
-  const colors: Record<string, string> = {
-    imported:  "bg-blue-100 text-blue-700",
-    pending:   "bg-amber-100 text-amber-700",
-    rejected:  "bg-red-100 text-red-700",
-    completed: "bg-green-100 text-green-700",
-    cancelled: "bg-gray-100 text-gray-500",
-  };
-  return colors[status] ?? "bg-gray-100 text-gray-500";
-}
-
 function isAdminRole(roles: string[]): boolean {
   return roles.some((r) => ["document_admin", "system_admin", "auditor"].includes(r));
 }
+
+const selectClass =
+  "border border-line-strong rounded-md px-3 h-11 text-sm bg-surface text-ink " +
+  "focus:outline-none focus:ring-2 focus:ring-offset-1 focus:border-brand-400";
 
 export default function AdminDocumentsPage() {
   const router = useRouter();
@@ -176,118 +171,96 @@ export default function AdminDocumentsPage() {
   const totalPages = Math.ceil(total / pageSize);
 
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className="min-h-screen">
       {/* Success toast */}
       {importSuccess && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-green-600 text-white text-sm px-4 py-2 rounded-lg shadow-lg">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-success text-white text-sm px-4 py-2 rounded-md shadow-pop">
           {importSuccess}
         </div>
       )}
 
-      <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-12 z-10">
+      <header className="bg-surface border-b border-line px-4 py-4 sticky top-12 z-10">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-2">
           <div>
-            <h1 className="text-lg font-bold text-gray-900">เอกสารทั้งหมด</h1>
-            {!loading && <p className="text-xs text-gray-500">{total} รายการ</p>}
+            <h1 className="text-lg font-bold text-ink">เอกสารทั้งหมด</h1>
+            {!loading && <p className="text-sm text-muted">{total} รายการ</p>}
           </div>
-          <button
-            type="button"
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => { setImportError(null); setImportForm(IMPORT_FORM_INIT); setShowImport(true); }}
-            className="text-sm text-green-700 px-3 py-1.5 border border-green-300 rounded-lg"
           >
             นำเข้าเอกสาร
-          </button>
+          </Button>
         </div>
       </header>
 
       {/* Import dialog */}
       {showImport && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 px-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 flex flex-col gap-4">
-            <h2 className="text-base font-bold text-gray-900">นำเข้าเอกสาร</h2>
+          <div className="bg-surface rounded-2xl shadow-pop w-full max-w-md p-6 flex flex-col gap-4 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-base font-bold text-ink">นำเข้าเอกสาร</h2>
 
             {/* File */}
-            <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-gray-700">ไฟล์ PDF <span className="text-red-500">*</span></label>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-ink">ไฟล์ PDF *</label>
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="application/pdf"
                 title="เลือกไฟล์ PDF"
-                className="text-sm text-gray-700 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-400"
+                className="text-sm text-ink border border-line-strong rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-offset-1 file:mr-3 file:rounded file:border-0 file:bg-surface-muted file:px-3 file:py-1 file:text-ink"
                 onChange={(e) => setImportForm((f) => ({ ...f, file: e.target.files?.[0] ?? null }))}
               />
             </div>
 
-            {/* doc_no */}
-            <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-gray-700">เลขเอกสาร <span className="text-red-500">*</span></label>
-              <input
-                type="text"
-                value={importForm.doc_no}
-                onChange={(e) => setImportForm((f) => ({ ...f, doc_no: e.target.value }))}
-                placeholder="เช่น PO26060001"
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-              />
-            </div>
+            <Input
+              label="เลขเอกสาร *"
+              type="text"
+              value={importForm.doc_no}
+              onChange={(e) => setImportForm((f) => ({ ...f, doc_no: e.target.value }))}
+              placeholder="เช่น PO26060001"
+            />
 
-            {/* doc_format_code */}
-            <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-gray-700">รูปแบบเอกสาร <span className="text-red-500">*</span></label>
-              <input
-                type="text"
-                value={importForm.doc_format_code}
-                onChange={(e) => setImportForm((f) => ({ ...f, doc_format_code: e.target.value.trim().toUpperCase() }))}
-                placeholder="POP"
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-              />
-            </div>
+            <Input
+              label="รูปแบบเอกสาร *"
+              type="text"
+              value={importForm.doc_format_code}
+              onChange={(e) => setImportForm((f) => ({ ...f, doc_format_code: e.target.value.trim().toUpperCase() }))}
+              placeholder="POP"
+            />
 
-            {/* doc_date (optional) */}
-            <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-gray-700">วันที่เอกสาร <span className="text-gray-400 text-xs">(ไม่บังคับ)</span></label>
-              <input
-                type="date"
-                title="วันที่เอกสาร"
-                value={importForm.doc_date}
-                onChange={(e) => setImportForm((f) => ({ ...f, doc_date: e.target.value }))}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-              />
-            </div>
+            <Input
+              label="วันที่เอกสาร (ไม่บังคับ)"
+              type="date"
+              title="วันที่เอกสาร"
+              value={importForm.doc_date}
+              onChange={(e) => setImportForm((f) => ({ ...f, doc_date: e.target.value }))}
+            />
 
-            {/* amount (optional) */}
-            <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-gray-700">จำนวนเงิน <span className="text-gray-400 text-xs">(ไม่บังคับ)</span></label>
-              <input
-                type="text"
-                value={importForm.amount}
-                onChange={(e) => setImportForm((f) => ({ ...f, amount: e.target.value }))}
-                placeholder="เช่น 15000.00"
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-              />
-            </div>
+            <Input
+              label="จำนวนเงิน (ไม่บังคับ)"
+              type="text"
+              value={importForm.amount}
+              onChange={(e) => setImportForm((f) => ({ ...f, amount: e.target.value }))}
+              placeholder="เช่น 15000.00"
+            />
 
             {/* Error */}
             {importError && (
-              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{importError}</p>
+              <p className="text-sm text-danger-fg bg-danger-bg border border-danger/30 rounded-md px-3 py-2">{importError}</p>
             )}
 
             {/* Actions */}
             <div className="flex justify-end gap-2 mt-1">
-              <button
-                onClick={closeImport}
-                disabled={importing}
-                className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg disabled:opacity-40"
-              >
-                ยกเลิก
-              </button>
-              <button
+              <Button variant="outline" onClick={closeImport} disabled={importing}>ยกเลิก</Button>
+              <Button
                 onClick={handleImport}
-                disabled={importing || !importForm.file || !importForm.doc_no.trim() || !importForm.doc_format_code.trim()}
-                className="px-4 py-2 text-sm text-white bg-green-600 rounded-lg disabled:opacity-40"
+                loading={importing}
+                disabled={!importForm.file || !importForm.doc_no.trim() || !importForm.doc_format_code.trim()}
               >
                 {importing ? "กำลังอัปโหลด..." : "อัปโหลด"}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -295,34 +268,34 @@ export default function AdminDocumentsPage() {
 
       <div className="max-w-3xl mx-auto px-4 py-4 flex flex-col gap-3">
         {/* Filters */}
-        <div className="bg-white rounded-xl border border-gray-200 p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        <Card padding="sm" className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <input
             value={qInput}
             onChange={(e) => handleSearch(e.target.value)}
             placeholder="ค้นหาเลขเอกสาร..."
-            className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className="flex-1 border border-line-strong rounded-md px-3 h-11 text-sm bg-surface text-ink placeholder:text-subtle focus:outline-none focus:ring-2 focus:ring-offset-1 focus:border-brand-400"
           />
           <input
             value={docFormatCode}
             onChange={(e) => { setDocFormatCode(e.target.value.trim().toUpperCase()); setPage(1); }}
             placeholder="รูปแบบ (POP...)"
-            className="w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className="sm:w-32 border border-line-strong rounded-md px-3 h-11 text-sm bg-surface text-ink placeholder:text-subtle focus:outline-none focus:ring-2 focus:ring-offset-1 focus:border-brand-400"
           />
           <select
             value={status}
             onChange={(e) => handleStatusChange(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+            className={selectClass}
           >
             {DOC_STATUS_OPTIONS.map((s) => (
               <option key={s} value={s}>{s ? DOC_STATUS_LABELS[s] : "— สถานะทั้งหมด —"}</option>
             ))}
           </select>
-        </div>
+        </Card>
 
         {/* Loading */}
         {loading && (
-          <div className="flex justify-center py-16">
-            <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          <div className="flex justify-center py-16 text-brand">
+            <Spinner size="md" />
           </div>
         )}
 
@@ -333,7 +306,7 @@ export default function AdminDocumentsPage() {
 
         {/* Empty */}
         {!loading && !error && docs.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+          <div className="flex flex-col items-center justify-center py-16 text-subtle">
             <p className="text-sm">ไม่พบเอกสาร</p>
           </div>
         )}
@@ -342,56 +315,42 @@ export default function AdminDocumentsPage() {
         {!loading && !error && docs.length > 0 && (
           <div className="flex flex-col gap-2">
             {docs.map((doc) => (
-              <button
-                key={doc.id}
-                onClick={() => router.push(`/admin/documents/${doc.id}`)}
-                className="w-full text-left bg-white border border-gray-200 rounded-xl p-4 shadow-sm active:scale-[0.98] transition-transform"
-              >
-                <div className="flex items-start justify-between gap-2">
+              <CardButton key={doc.id} onClick={() => router.push(`/admin/documents/${doc.id}`)}>
+                <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-900 truncate">
+                    <p className="font-semibold text-ink truncate">
                       {doc.doc_format_code} — {doc.doc_no}
                     </p>
-                    <p className="text-xs text-gray-500 mt-0.5">
+                    <p className="text-xs text-muted mt-0.5">
                       เวอร์ชัน {doc.workflow_version}
                       {doc.revision > 0 && ` · ครั้งที่ ${doc.revision + 1}`}
                     </p>
                     {doc.amount && (
-                      <p className="text-sm font-medium text-blue-700 mt-1">
-                        ฿{parseFloat(doc.amount).toLocaleString()}
+                      <p className="text-sm font-semibold text-brand-700 mt-1">
+                        ฿{parseFloat(doc.amount).toLocaleString("th-TH", { minimumFractionDigits: 2 })}
                       </p>
                     )}
                   </div>
-                  <span className={`text-xs px-2 py-1 rounded-full flex-shrink-0 ${statusBadge(doc.status)}`}>
-                    {DOC_STATUS_LABELS[doc.status] ?? doc.status}
-                  </span>
+                  <StatusBadge kind="document" status={doc.status} />
                 </div>
                 {doc.doc_date && (
-                  <p className="text-xs text-gray-400 mt-2">{doc.doc_date}</p>
+                  <p className="text-xs text-subtle mt-2">{doc.doc_date}</p>
                 )}
-              </button>
+              </CardButton>
             ))}
           </div>
         )}
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex justify-center gap-4 mt-2">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm disabled:opacity-40"
-            >
+          <div className="flex items-center justify-center gap-3 mt-2">
+            <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
               ← ก่อนหน้า
-            </button>
-            <span className="px-3 py-2 text-sm text-gray-600">{page}/{totalPages}</span>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-sm disabled:opacity-40"
-            >
+            </Button>
+            <span className="text-sm text-muted tabular-nums">{page}/{totalPages}</span>
+            <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>
               ถัดไป →
-            </button>
+            </Button>
           </div>
         )}
       </div>

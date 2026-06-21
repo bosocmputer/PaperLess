@@ -14,6 +14,7 @@ import {
 import { getAccessToken, getUser } from "@/lib/auth";
 import ErrorState from "@/components/ErrorState";
 import WorkflowProgress from "@/components/WorkflowProgress";
+import { Button, Card, Input, Spinner, StatusBadge } from "@/components/ui";
 
 interface PageProps {
   params: { id: string };
@@ -35,14 +36,6 @@ function formatDateTime(raw: string): string {
   return d.toLocaleString("th-TH");
 }
 
-// external_signers.status CHECK (0001_init.up.sql): pending,signed,expired,cancelled
-const SIGNER_STATUS_LABELS: Record<string, string> = {
-  pending:   "รอเซ็น",
-  signed:    "เซ็นแล้ว",
-  expired:   "หมดอายุ",
-  cancelled: "ยกเลิก",
-};
-
 // documents.status CHECK (0001_init.up.sql): imported,pending,rejected,completed,cancelled
 const DOC_STATUS_LABELS: Record<string, string> = {
   imported:  "นำเข้าแล้ว",
@@ -51,16 +44,6 @@ const DOC_STATUS_LABELS: Record<string, string> = {
   completed: "เสร็จสิ้น",
   cancelled: "ยกเลิก",
 };
-
-function signerStatusBadge(status: string) {
-  const colors: Record<string, string> = {
-    pending:   "bg-amber-100 text-amber-700",
-    signed:    "bg-green-100 text-green-700",
-    expired:   "bg-gray-100 text-gray-500",
-    cancelled: "bg-gray-100 text-gray-500",
-  };
-  return colors[status] ?? "bg-gray-100 text-gray-500";
-}
 
 function isAdminRole(roles: string[]): boolean {
   return roles.some((r) => ["document_admin", "system_admin", "auditor"].includes(r));
@@ -239,17 +222,17 @@ export default function AdminDocDetailPage({ params }: PageProps) {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen flex items-center justify-center text-brand">
+        <Spinner size="md" />
       </div>
     );
   }
 
   if (error || !doc) {
     return (
-      <main className="min-h-screen bg-gray-50 flex flex-col">
-        <header className="bg-white border-b border-gray-200 px-4 py-4">
-          <button onClick={() => router.back()} className="text-blue-600 text-sm">← กลับ</button>
+      <main className="min-h-screen flex flex-col">
+        <header className="bg-surface border-b border-line px-4 py-3">
+          <button onClick={() => router.back()} className="touch-target -ml-2 px-2 text-sm font-medium text-brand-700 rounded-md">← กลับ</button>
         </header>
         <div className="flex-1 flex items-center justify-center">
           <ErrorState code={error ?? "not_found"} onRetry={error === "network_error" ? load : undefined} />
@@ -260,17 +243,17 @@ export default function AdminDocDetailPage({ params }: PageProps) {
 
   return (
     <>
-      <main className="min-h-screen bg-gray-50 flex flex-col">
-        <header className="bg-white border-b border-gray-200 px-4 py-4 sticky top-12 z-10">
+      <main className="min-h-screen flex flex-col">
+        <header className="bg-surface border-b border-line px-4 py-3 sticky top-12 z-10">
           <div className="max-w-3xl mx-auto flex items-center gap-3">
-            <button onClick={() => router.back()} className="text-blue-600 text-sm flex-shrink-0">← กลับ</button>
+            <button onClick={() => router.back()} className="touch-target -ml-2 px-2 text-sm font-medium text-brand-700 flex-shrink-0 rounded-md">← กลับ</button>
             <div className="flex-1 min-w-0">
-              <h1 className="text-base font-bold text-gray-900 truncate">
+              <h1 className="text-base font-bold text-ink truncate">
                 {doc.doc_format_code} — {doc.doc_no}
               </h1>
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-muted">
                 {DOC_STATUS_LABELS[doc.status] ?? doc.status}
-                {doc.amount && ` · ฿${parseFloat(doc.amount).toLocaleString()}`}
+                {doc.amount && ` · ฿${parseFloat(doc.amount).toLocaleString("th-TH", { minimumFractionDigits: 2 })}`}
               </p>
             </div>
           </div>
@@ -279,31 +262,33 @@ export default function AdminDocDetailPage({ params }: PageProps) {
         <div className="max-w-3xl mx-auto w-full px-4 py-4 flex flex-col gap-4">
 
           {/* Document metadata */}
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <p className="text-sm font-medium text-gray-700 mb-3">รายละเอียดเอกสาร</p>
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-              <dt className="text-gray-500">รูปแบบ</dt>
-              <dd className="text-gray-800 font-medium">{doc.doc_format_code}</dd>
-              <dt className="text-gray-500">เลขเอกสาร</dt>
-              <dd className="text-gray-800 break-all">{doc.doc_no}</dd>
+          <Card>
+            <p className="text-sm font-semibold text-ink mb-3">รายละเอียดเอกสาร</p>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm items-center">
+              <dt className="text-muted">รูปแบบ</dt>
+              <dd className="text-ink font-medium">{doc.doc_format_code}</dd>
+              <dt className="text-muted">เลขเอกสาร</dt>
+              <dd className="text-ink break-all">{doc.doc_no}</dd>
               {doc.doc_date && (
                 <>
-                  <dt className="text-gray-500">วันที่</dt>
-                  <dd className="text-gray-800">{doc.doc_date}</dd>
+                  <dt className="text-muted">วันที่</dt>
+                  <dd className="text-ink">{doc.doc_date}</dd>
                 </>
               )}
               {doc.amount && (
                 <>
-                  <dt className="text-gray-500">จำนวนเงิน</dt>
-                  <dd className="text-gray-800">฿{parseFloat(doc.amount).toLocaleString()}</dd>
+                  <dt className="text-muted">จำนวนเงิน</dt>
+                  <dd className="text-ink">฿{parseFloat(doc.amount).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</dd>
                 </>
               )}
-              <dt className="text-gray-500">เวอร์ชัน Workflow</dt>
-              <dd className="text-gray-800">{doc.workflow_version}</dd>
+              <dt className="text-muted">เวอร์ชัน Workflow</dt>
+              <dd className="text-ink">{doc.workflow_version}</dd>
+              <dt className="text-muted">สถานะเอกสาร</dt>
+              <dd><StatusBadge kind="document" status={doc.status} /></dd>
               {doc.sync_status && (
                 <>
-                  <dt className="text-gray-500">สถานะ SML</dt>
-                  <dd className="text-gray-800">{doc.sync_status}</dd>
+                  <dt className="text-muted">สถานะ SML</dt>
+                  <dd><StatusBadge kind="sync" status={doc.sync_status} /></dd>
                 </>
               )}
             </dl>
@@ -314,7 +299,7 @@ export default function AdminDocDetailPage({ params }: PageProps) {
                 href={`${api.originalPdfUrl(docId)}?token=${encodeURIComponent(token)}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 text-center py-2 border border-gray-300 rounded-lg text-sm text-gray-700"
+                className="flex-1 text-center h-11 inline-flex items-center justify-center border border-line-strong rounded-md text-sm text-ink hover:bg-surface-muted"
               >
                 ดาวน์โหลด PDF ต้นฉบับ
               </a>
@@ -323,67 +308,66 @@ export default function AdminDocDetailPage({ params }: PageProps) {
                   href={`${api.finalPdfUrl(docId)}?token=${encodeURIComponent(token)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 text-center py-2 bg-blue-600 text-white rounded-lg text-sm font-medium"
+                  className="flex-1 text-center h-11 inline-flex items-center justify-center bg-brand text-white rounded-md text-sm font-medium hover:bg-brand-700"
                 >
                   ดาวน์โหลด PDF ฉบับจริง
                 </a>
               )}
             </div>
-          </div>
+          </Card>
 
           {/* Workflow progress */}
           {steps.length > 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <p className="text-sm font-medium text-gray-700 mb-3">ขั้นตอน Workflow</p>
+            <Card>
+              <p className="text-sm font-semibold text-ink mb-3">ขั้นตอน Workflow</p>
               <WorkflowProgress steps={steps} currentSeq={steps.find((s) => !s.complete)?.sequence_no ?? 1} />
-            </div>
+            </Card>
           )}
 
           {/* External signers */}
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <p className="text-sm font-medium text-gray-700 mb-3">ผู้เซ็นภายนอก</p>
+          <Card>
+            <p className="text-sm font-semibold text-ink mb-3">ผู้เซ็นภายนอก</p>
             {actionMsg && (
-              <div className="mb-3 text-xs bg-blue-50 text-blue-700 rounded-lg px-3 py-2">{actionMsg}</div>
+              <div className="mb-3 text-xs bg-info-bg text-info-fg rounded-md px-3 py-2">{actionMsg}</div>
             )}
             {signers.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4">ไม่มีผู้เซ็นภายนอก</p>
+              <p className="text-sm text-subtle text-center py-4">ไม่มีผู้เซ็นภายนอก</p>
             ) : (
               <div className="flex flex-col gap-3">
                 {signers.map((s) => (
-                  <div key={s.id} className="border border-gray-100 rounded-lg p-3">
+                  <div key={s.id} className="border border-line rounded-md p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-800">{s.name}</p>
-                        {s.email && <p className="text-xs text-gray-500">{s.email}</p>}
-                        {s.phone && <p className="text-xs text-gray-500">{s.phone}</p>}
-                        <p className="text-xs text-gray-400 mt-1">
+                        <p className="text-sm font-medium text-ink">{s.name}</p>
+                        {s.email && <p className="text-xs text-muted truncate">{s.email}</p>}
+                        {s.phone && <p className="text-xs text-muted">{s.phone}</p>}
+                        <p className="text-xs text-subtle mt-1">
                           หมดอายุ {formatDateTime(s.expires_at)}
                         </p>
                       </div>
-                      <span className={`text-xs px-2 py-1 rounded-full flex-shrink-0 ${signerStatusBadge(s.status)}`}>
-                        {SIGNER_STATUS_LABELS[s.status] ?? s.status}
-                      </span>
+                      <StatusBadge kind="signer" status={s.status} />
                     </div>
 
                     {/* Actions — only for document_admin/system_admin and non-terminal docs */}
                     {canMutateSigner(userRoles) && !isTerminal && (
                       <div className="mt-2 flex gap-2">
                         {s.status === "pending" && (
-                          <button
-                            onClick={() => openResend(s)}
-                            className="flex-1 py-1.5 border border-blue-300 text-blue-600 rounded-lg text-xs"
-                          >
+                          <Button variant="outline" size="sm" block onClick={() => openResend(s)}>
                             ส่งลิงก์ใหม่
-                          </button>
+                          </Button>
                         )}
                         {(s.status === "pending" || s.status === "expired") && (
-                          <button
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            block
                             onClick={() => handleCancel(s.id)}
                             disabled={cancellingId === s.id}
-                            className="flex-1 py-1.5 border border-red-200 text-red-600 rounded-lg text-xs disabled:opacity-40"
+                            loading={cancellingId === s.id}
+                            className="border-danger/40 text-danger-fg"
                           >
                             {cancellingId === s.id ? "กำลังยกเลิก..." : "ยกเลิก"}
-                          </button>
+                          </Button>
                         )}
                       </div>
                     )}
@@ -391,31 +375,31 @@ export default function AdminDocDetailPage({ params }: PageProps) {
                 ))}
               </div>
             )}
-          </div>
+          </Card>
 
           {/* Audit timeline */}
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <p className="text-sm font-medium text-gray-700 mb-3">ประวัติเอกสาร</p>
+          <Card>
+            <p className="text-sm font-semibold text-ink mb-3">ประวัติเอกสาร</p>
             {auditLogs.length === 0 && sigEvents.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4">ยังไม่มีประวัติ</p>
+              <p className="text-sm text-subtle text-center py-4">ยังไม่มีประวัติ</p>
             ) : (
               <div className="flex flex-col gap-2">
                 {/* Signature events */}
                 {sigEvents.map((e) => (
-                  <div key={`sig-${e.id}`} className="flex gap-3 py-2 border-b border-gray-50 last:border-0">
-                    <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0 text-xs">
+                  <div key={`sig-${e.id}`} className="flex gap-3 py-2 border-b border-line last:border-0">
+                    <div className="w-8 h-8 rounded-full bg-success-bg text-success-fg flex items-center justify-center flex-shrink-0 text-xs">
                       ✍
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-800">
+                      <p className="text-sm text-ink">
                         <span className="font-medium">{e.signer_name}</span>
                         {" — "}{e.action}
                         {e.signer_type === "external" && (
-                          <span className="ml-1 text-xs text-gray-400">(ภายนอก)</span>
+                          <span className="ml-1 text-xs text-subtle">(ภายนอก)</span>
                         )}
                       </p>
-                      {e.comment && <p className="text-xs text-gray-500 mt-0.5 italic">{e.comment}</p>}
-                      <p className="text-xs text-gray-400 mt-0.5">
+                      {e.comment && <p className="text-xs text-muted mt-0.5 italic">{e.comment}</p>}
+                      <p className="text-xs text-subtle mt-0.5">
                         {e.signed_at.replace("T", " ").slice(0, 19)}
                         {e.ip_address && ` · ${e.ip_address}`}
                       </p>
@@ -424,23 +408,23 @@ export default function AdminDocDetailPage({ params }: PageProps) {
                 ))}
                 {/* Audit log entries */}
                 {auditLogs.map((e) => (
-                  <div key={`al-${e.id}`} className="flex gap-3 py-2 border-b border-gray-50 last:border-0">
-                    <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center flex-shrink-0 text-xs">
+                  <div key={`al-${e.id}`} className="flex gap-3 py-2 border-b border-line last:border-0">
+                    <div className="w-8 h-8 rounded-full bg-info-bg text-info-fg flex items-center justify-center flex-shrink-0 text-xs">
                       📋
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-800">
+                      <p className="text-sm text-ink">
                         {e.action}
-                        {e.actor_id && <span className="text-xs text-gray-400 ml-1">(user {e.actor_id})</span>}
+                        {e.actor_id && <span className="text-xs text-subtle ml-1">(user {e.actor_id})</span>}
                       </p>
-                      {e.reason && <p className="text-xs text-gray-500 mt-0.5 italic">{e.reason}</p>}
-                      <p className="text-xs text-gray-400 mt-0.5">{e.created_at.slice(0, 19)}</p>
+                      {e.reason && <p className="text-xs text-muted mt-0.5 italic">{e.reason}</p>}
+                      <p className="text-xs text-subtle mt-0.5">{e.created_at.slice(0, 19)}</p>
                     </div>
                   </div>
                 ))}
               </div>
             )}
-          </div>
+          </Card>
         </div>
       </main>
 
@@ -448,87 +432,80 @@ export default function AdminDocDetailPage({ params }: PageProps) {
       {resendModal.open && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={resendModal.phase === "success" ? closeResend : undefined} />
-          <div className="relative bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto shadow-xl">
+          <div className="relative bg-surface rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto shadow-pop">
 
             {resendModal.phase === "success" ? (
               <div className="p-5 flex flex-col gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl">✅</span>
+                <div className="flex items-center gap-3">
+                  <span className="flex items-center justify-center w-10 h-10 rounded-full bg-success-bg text-success-fg text-xl">✓</span>
                   <div>
-                    <h2 className="text-base font-bold text-gray-900">ส่งลิงก์ใหม่สำเร็จ</h2>
-                    <p className="text-xs text-gray-500">สำหรับ {resendModal.signerName}</p>
+                    <h2 className="text-base font-bold text-ink">ส่งลิงก์ใหม่สำเร็จ</h2>
+                    <p className="text-xs text-muted">สำหรับ {resendModal.signerName}</p>
                   </div>
                 </div>
 
-                <div className="bg-red-50 border border-red-200 rounded-xl p-3">
-                  <p className="text-xs font-semibold text-red-700 mb-1">⚠ คัดลอกเดี๋ยวนี้ — จะไม่แสดงอีก</p>
-                  <p className="text-xs text-red-600">ระบบจะไม่สามารถแสดงโทเคนหรือลิงก์นี้ซ้ำได้อีก</p>
+                <div className="bg-danger-bg border border-danger/30 rounded-md p-3">
+                  <p className="text-xs font-semibold text-danger-fg mb-1">⚠ คัดลอกเดี๋ยวนี้ — จะไม่แสดงอีก</p>
+                  <p className="text-xs text-danger-fg">ระบบจะไม่สามารถแสดงโทเคนหรือลิงก์นี้ซ้ำได้อีก</p>
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <p className="text-xs font-medium text-gray-600">ลิงก์เซ็นเอกสาร</p>
-                  <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs font-mono text-gray-700 break-all">
+                  <p className="text-xs font-medium text-muted">ลิงก์เซ็นเอกสาร</p>
+                  <div className="bg-surface-muted rounded-md px-3 py-2 text-xs font-mono text-ink break-all">
                     {window.location.origin}/external/{tokenRef.current}
                   </div>
-                  <button
+                  <Button
                     onClick={copyLink}
-                    className={`w-full py-2.5 rounded-lg text-sm font-medium active:scale-95 ${linkCopied ? "bg-green-600 text-white" : "bg-blue-600 text-white"}`}
+                    className={linkCopied ? "bg-success hover:bg-success" : undefined}
+                    block
                   >
                     {linkCopied ? "คัดลอกลิงก์แล้ว ✓" : "คัดลอกลิงก์"}
-                  </button>
+                  </Button>
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <p className="text-xs font-medium text-gray-600">โทเคน</p>
-                  <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs font-mono text-gray-700 break-all">
+                  <p className="text-xs font-medium text-muted">โทเคน</p>
+                  <div className="bg-surface-muted rounded-md px-3 py-2 text-xs font-mono text-ink break-all">
                     {tokenRef.current}
                   </div>
-                  <button
-                    onClick={copyToken}
-                    className={`w-full py-2 rounded-lg text-sm active:scale-95 ${tokenCopied ? "bg-green-100 text-green-700 border border-green-300" : "bg-gray-100 text-gray-700 border border-gray-300"}`}
-                  >
+                  <Button onClick={copyToken} variant={tokenCopied ? "secondary" : "outline"} size="sm" block>
                     {tokenCopied ? "คัดลอกโทเคนแล้ว ✓" : "คัดลอกโทเคน"}
-                  </button>
+                  </Button>
                 </div>
 
-                <p className="text-xs text-gray-500 text-center">
+                <p className="text-xs text-muted text-center">
                   หมดอายุ: {formatDateTime(resendModal.result.expires_at)}
                 </p>
 
-                <button onClick={closeResend} className="w-full py-2.5 border border-gray-300 rounded-lg text-sm text-gray-700 active:scale-95">
-                  ปิด
-                </button>
+                <Button onClick={closeResend} variant="outline" block>ปิด</Button>
               </div>
             ) : (
               <div className="p-5 flex flex-col gap-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-base font-bold text-gray-900">ส่งลิงก์ใหม่</h2>
-                  <button onClick={() => setResendModal({ open: false })} className="text-gray-400 text-xl leading-none">×</button>
+                  <h2 className="text-base font-bold text-ink">ส่งลิงก์ใหม่</h2>
+                  <button onClick={() => setResendModal({ open: false })} className="text-subtle text-2xl leading-none touch-target -mr-2 px-2">×</button>
                 </div>
-                <p className="text-sm text-gray-600">สำหรับ <strong>{resendModal.signerName}</strong></p>
-                <div>
-                  <label className="text-xs font-medium text-gray-600 block mb-1">หมดอายุใน (ชั่วโมง)</label>
-                  <input
-                    value={resendHours}
-                    onChange={(e) => setResendHours(e.target.value)}
-                    type="number"
-                    min={1}
-                    max={168}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    disabled={resendModal.phase === "submitting"}
-                  />
-                  <p className="text-xs text-gray-400 mt-1">สูงสุด 168 ชั่วโมง (7 วัน)</p>
-                </div>
-                {resendError && (
-                  <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{resendError}</p>
-                )}
-                <button
-                  onClick={handleResend}
+                <p className="text-sm text-muted">สำหรับ <strong className="text-ink">{resendModal.signerName}</strong></p>
+                <Input
+                  label="หมดอายุใน (ชั่วโมง)"
+                  value={resendHours}
+                  onChange={(e) => setResendHours(e.target.value)}
+                  type="number"
+                  min={1}
+                  max={168}
+                  hint="สูงสุด 168 ชั่วโมง (7 วัน)"
                   disabled={resendModal.phase === "submitting"}
-                  className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-40 active:scale-95"
+                />
+                {resendError && (
+                  <p className="text-xs text-danger-fg bg-danger-bg rounded-md px-3 py-2">{resendError}</p>
+                )}
+                <Button
+                  onClick={handleResend}
+                  loading={resendModal.phase === "submitting"}
+                  block
                 >
                   {resendModal.phase === "submitting" ? "กำลังสร้างลิงก์..." : "สร้างลิงก์ใหม่"}
-                </button>
+                </Button>
               </div>
             )}
           </div>

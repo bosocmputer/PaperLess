@@ -4,6 +4,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { saveSession } from "@/lib/auth";
+import { Button, Card, Input } from "@/components/ui";
+
+// Roles that land on the admin dashboard rather than the signer inbox.
+// Keep in sync with the root redirect (src/app/page.tsx).
+const ADMIN_ROLES = ["system_admin", "workflow_admin", "document_admin", "auditor"];
+
+function landingFor(roles: string[]): string {
+  return roles.some((r) => ADMIN_ROLES.includes(r)) ? "/admin/documents" : "/inbox";
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -25,7 +34,8 @@ export default function LoginPage() {
         return;
       }
       saveSession(result.data.access_token, result.data.refresh_token, result.data.user);
-      router.replace("/inbox");
+      // Role-based landing: admins/auditors → dashboard, signers → inbox.
+      router.replace(landingFor(result.data.user.roles ?? []));
     } catch {
       setError("ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้");
     } finally {
@@ -34,51 +44,43 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+    <main className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">PaperLess</h1>
-          <p className="text-sm text-gray-500 mt-1">ระบบเซ็นเอกสารอิเล็กทรอนิกส์</p>
+          <h1 className="text-2xl font-bold text-brand-700 tracking-tight">PaperLess</h1>
+          <p className="text-sm text-muted mt-1">ระบบเซ็นเอกสารอิเล็กทรอนิกส์</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 flex flex-col gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อผู้ใช้</label>
-            <input
+        <Card padding="lg" className="rounded-2xl">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <Input
+              label="ชื่อผู้ใช้"
               type="text"
               autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="username"
             />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">รหัสผ่าน</label>
-            <input
+            <Input
+              label="รหัสผ่าน"
               type="password"
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="••••••••"
             />
-          </div>
 
-          {error && (
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
-          )}
+            {error && (
+              <p className="text-sm text-danger-fg bg-danger-bg border border-danger/30 rounded-md px-3 py-2">{error}</p>
+            )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-50 active:scale-95 transition-transform"
-          >
-            {loading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
-          </button>
-        </form>
+            <Button type="submit" loading={loading} size="lg" block>
+              {loading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+            </Button>
+          </form>
+        </Card>
       </div>
     </main>
   );

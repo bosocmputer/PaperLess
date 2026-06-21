@@ -1,5 +1,7 @@
 "use client";
 
+import { Button } from "@/components/ui";
+
 interface Props {
   code: string;
   message?: string;
@@ -28,23 +30,36 @@ const MESSAGES: Record<string, string> = {
   rate_limited:                "มีการร้องขอมากเกินไป กรุณาลองใหม่ในอีกสักครู่",
 };
 
+// Codes that are normal/positive outcomes, not failures — shown calmer.
+const POSITIVE = new Set([
+  "no_pending_documents",
+  "document_already_completed",
+  "external_link_used",
+]);
+
 export default function ErrorState({ code, message, onRetry }: Props) {
   const displayMsg = message ?? MESSAGES[code] ?? `เกิดข้อผิดพลาด (${code})`;
+  const positive = POSITIVE.has(code);
 
   return (
-    <div className="flex flex-col items-center justify-center gap-4 py-12 px-4 text-center">
-      <div className="text-4xl">⚠️</div>
-      <p className="text-lg font-medium text-gray-800">{displayMsg}</p>
+    <div className="flex flex-col items-center justify-center gap-4 py-14 px-4 text-center">
+      <div
+        className={
+          "flex items-center justify-center w-14 h-14 rounded-full text-2xl " +
+          (positive ? "bg-success-bg text-success-fg" : "bg-warning-bg text-warning-fg")
+        }
+        aria-hidden
+      >
+        {positive ? "✓" : "!"}
+      </div>
+      <p className="text-base font-medium text-ink max-w-xs text-balance">{displayMsg}</p>
       {code === "pdf_preview_failed" && (
-        <p className="text-sm text-gray-500">คุณสามารถดาวน์โหลดเอกสารได้โดยตรง</p>
+        <p className="text-sm text-muted">คุณสามารถดาวน์โหลดเอกสารได้โดยตรง</p>
       )}
       {onRetry && (
-        <button
-          onClick={onRetry}
-          className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm active:scale-95"
-        >
+        <Button variant="outline" size="sm" onClick={onRetry} className="mt-1">
           ลองใหม่
-        </button>
+        </Button>
       )}
     </div>
   );
