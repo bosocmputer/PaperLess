@@ -17,8 +17,37 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
+	"paperless-api/internal/config"
+	"paperless-api/internal/storage"
 	"paperless-api/internal/workflow"
 )
+
+// testSigPNGB64 is a minimal valid PNG (1×1) for signing in tests.
+const testSigPNGB64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+
+// testMinioStore builds a real MinIO-backed store for sign tests (signing now
+// uploads the signature image). Skips the test if MINIO_TEST_ENDPOINT is unset.
+func testMinioStore(t *testing.T) *storage.Client {
+	t.Helper()
+	endpoint := os.Getenv("MINIO_TEST_ENDPOINT")
+	if endpoint == "" {
+		t.Skip("MINIO_TEST_ENDPOINT not set — skipping sign test that stores the image")
+	}
+	cfg := &config.Config{}
+	cfg.Storage.Endpoint = endpoint
+	cfg.Storage.AccessKey = getEnvOr("MINIO_TEST_ACCESS_KEY", "minioadmin")
+	cfg.Storage.SecretKey = getEnvOr("MINIO_TEST_SECRET_KEY", "minioadmin")
+	cfg.Storage.Bucket = fmt.Sprintf("paperless-test-%d", time.Now().UnixNano())
+	cfg.Storage.UseSSL = false
+	store, err := storage.New(cfg)
+	if err != nil {
+		t.Fatalf("storage.New: %v", err)
+	}
+	if err := store.EnsureBucket(context.Background()); err != nil {
+		t.Fatalf("EnsureBucket: %v", err)
+	}
+	return store
+}
 
 // These tests probe the public external-sign HTTP surface against a real DB.
 // Gated on PAPERLESS_TEST_DB. Storage is nil — the only route needing storage
@@ -104,10 +133,14 @@ func seedExternalDoc(t *testing.T, pool *pgxpool.Pool) (rawTokenHex string, docI
 }
 
 func newExtRouter(pool *pgxpool.Pool) (*gin.Engine, *ExternalSignHandler) {
+	return newExtRouterWithStore(pool, nil)
+}
+
+func newExtRouterWithStore(pool *pgxpool.Pool, store *storage.Client) (*gin.Engine, *ExternalSignHandler) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	eng := workflow.New(pool)
-	h := NewExternalSignHandler(pool, nil, eng, zap.NewNop())
+	h := NewExternalSignHandler(pool, store, eng, zap.NewNop())
 	r.GET("/external/document", h.DocumentView)
 	r.POST("/external/sign", h.Sign)
 	return r, h
@@ -142,7 +175,8 @@ func TestExtHTTP_GarbageToken_NoStackTrace(t *testing.T) {
 
 func TestExtHTTP_ValidToken_View_Then_Sign_Then_Reuse(t *testing.T) {
 	pool := auditPool(t)
-	r, _ := newExtRouter(pool)
+	store := testMinioStore(t) // skips if MinIO unavailable; signing stores the image
+	r, _ := newExtRouterWithStore(pool, store)
 	rawToken, docID, _ := seedExternalDoc(t, pool)
 	ctx := context.Background()
 
@@ -156,7 +190,7 @@ func TestExtHTTP_ValidToken_View_Then_Sign_Then_Reuse(t *testing.T) {
 	}
 
 	// Sign with valid token.
-	body := `{"signature_image_hash":"sig123","consent_text":"ok","request_id":"http-req-1"}`
+	body := fmt.Sprintf(`{"signature_image":%q,"consent_text":"ok","request_id":"http-req-1"}`, testSigPNGB64)
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest("POST", "/external/sign", strings.NewReader(body))
 	req.Header.Set("X-Signer-Token", rawToken)

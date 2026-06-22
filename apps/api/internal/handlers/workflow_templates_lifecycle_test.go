@@ -349,6 +349,12 @@ func TestWorkflowLifecycle_Publish_DemotesExistingActive(t *testing.T) {
 	`, fmtCode).Scan(&v2ID); err != nil {
 		t.Fatalf("seed v2: %v", err)
 	}
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO workflow_steps (workflow_template_id, position_code, position_name, sequence_no, condition_type)
+		VALUES ($1, 'P1', 'Pos 1', 1, 1)
+	`, v2ID); err != nil {
+		t.Fatalf("seed v2 step: %v", err)
+	}
 
 	r := newLifecycleRouter(pool, "workflow_admin")
 	w := httptest.NewRecorder()
@@ -438,6 +444,13 @@ func TestWorkflowLifecycle_Publish_ConcurrentRace(t *testing.T) {
 					RETURNING id
 				`, fmtCode, i+1).Scan(dest); err != nil {
 					t.Fatalf("seed v%d: %v", i+1, err)
+				}
+				// Publishable templates need ≥1 step (no_steps guard).
+				if _, err := pool.Exec(ctx, `
+					INSERT INTO workflow_steps (workflow_template_id, position_code, position_name, sequence_no, condition_type)
+					VALUES ($1, 'P1', 'Pos 1', 1, 1)
+				`, *dest); err != nil {
+					t.Fatalf("seed v%d step: %v", i+1, err)
 				}
 			}
 
@@ -659,6 +672,12 @@ func TestWorkflowLifecycle_InFlightDocsUnaffected(t *testing.T) {
 		RETURNING id
 	`, fmtCode).Scan(&v2ID); err != nil {
 		t.Fatalf("seed v2: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workflow_steps (workflow_template_id, position_code, position_name, sequence_no, condition_type)
+		VALUES ($1, 'P1', 'Pos 1', 1, 1)
+	`, v2ID); err != nil {
+		t.Fatalf("seed v2 step: %v", err)
 	}
 
 	r := newLifecycleRouter(pool, "workflow_admin")

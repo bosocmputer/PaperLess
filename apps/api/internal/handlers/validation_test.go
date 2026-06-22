@@ -219,9 +219,9 @@ func TestExternalSign_ValidationErrors(t *testing.T) {
 	pool := validationPool(t)
 	r, _ := newExtRouter(pool)
 
-	// We need a valid token for the request_id / hash length tests.
-	// Use a valid-format but unmatched token so the validation fires before DB lookup.
-	// (The hash/request_id checks happen before the DB query.)
+	// Valid-format but unmatched token: the signature_image / request_id checks
+	// run before the DB token lookup, so these validations fire regardless of the
+	// token matching a row.
 	validFormatToken := strings.Repeat("ab", 32) // 64-char hex = valid format
 
 	cases := []struct {
@@ -232,30 +232,23 @@ func TestExternalSign_ValidationErrors(t *testing.T) {
 		wantCode   string
 	}{
 		{
-			name:       "missing signature_image_hash",
+			name:       "missing signature_image",
 			token:      validFormatToken,
 			body:       `{"consent_text":"ok","request_id":"r1"}`,
 			wantStatus: http.StatusBadRequest,
 			wantCode:   "signature_required",
 		},
 		{
-			name:       "oversized signature_image_hash",
-			token:      validFormatToken,
-			body:       fmt.Sprintf(`{"signature_image_hash":%q,"request_id":"r1"}`, strings.Repeat("a", 257)),
-			wantStatus: http.StatusBadRequest,
-			wantCode:   "invalid_request",
-		},
-		{
 			name:       "missing request_id",
 			token:      validFormatToken,
-			body:       `{"signature_image_hash":"abc123"}`,
+			body:       `{"signature_image":"x"}`,
 			wantStatus: http.StatusBadRequest,
 			wantCode:   "invalid_request",
 		},
 		{
 			name:       "oversized request_id",
 			token:      validFormatToken,
-			body:       fmt.Sprintf(`{"signature_image_hash":"abc123","request_id":%q}`, strings.Repeat("x", 129)),
+			body:       fmt.Sprintf(`{"signature_image":"x","request_id":%q}`, strings.Repeat("x", 129)),
 			wantStatus: http.StatusBadRequest,
 			wantCode:   "invalid_request",
 		},
