@@ -257,6 +257,14 @@ export interface RoleOption {
   name: string;
 }
 
+// Aggregate counts from GET /dashboard/stats
+export interface DashboardStats {
+  total: number;
+  by_status: Record<string, number>;
+  by_sync: Record<string, number>;
+  by_format: { doc_format_code: string; count: number }[];
+}
+
 // Attachment row from GET /documents/:id/attachments
 export interface Attachment {
   id: number;
@@ -411,6 +419,8 @@ export const api = {
 
   deactivateTemplate: (token: string, id: string) =>
     request<{ id: string; status: string }>(`/workflow-templates/${id}/deactivate`, { method: "POST" }, token),
+
+  dashboardStats: (token: string) => request<DashboardStats>("/dashboard/stats", {}, token),
 
   // ── Attachments ──
   listAttachments: (token: string, docId: number) =>

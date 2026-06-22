@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { getAccessToken, getUser, clearSession, getRefreshToken } from "@/lib/auth";
 
 const BASE_NAV_LINKS = [
+  { href: "/admin/dashboard", label: "แดชบอร์ด" },
   { href: "/admin/documents", label: "เอกสาร" },
   { href: "/admin/workflows", label: "ตั้งค่า Workflow" },
 ];

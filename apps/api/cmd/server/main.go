@@ -165,6 +165,10 @@ func main() {
 	// Attachment file download — header OR ?token= so it works in <a>/<img>/<iframe>.
 	v1.GET("/attachments/:id/file", requireAuthFile, attachH.Download)
 
+	// Dashboard stats (separate path so it doesn't collide with /documents/:id).
+	v1.GET("/dashboard/stats", requireAuth,
+		middleware.RequireRole("document_admin", "system_admin", "auditor"), docH.Stats)
+
 	// Signature tasks (auth required)
 	taskH := handlers.NewTaskHandler(pool, store, wfEngine, logger)
 	tasksG := v1.Group("/signature-tasks", requireAuth)
