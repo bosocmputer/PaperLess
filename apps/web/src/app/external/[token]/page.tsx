@@ -241,9 +241,9 @@ export default function ExternalSignPage() {
                 <span className="flex items-center justify-center w-7 h-7 rounded-full bg-success-bg text-success-fg text-sm">✓</span>
                 <p className="text-sm font-semibold text-ink">ลายเซ็นพร้อมส่ง</p>
               </div>
-              <p className="text-xs font-mono text-subtle break-all">
-                {signing.signatureHash.slice(0, 32)}...
-              </p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={signing.signatureHash} alt="ตัวอย่างลายเซ็น"
+                className="w-full max-h-32 object-contain bg-surface-muted rounded-md border border-line" />
             </Card>
 
             <div className="bg-warning-bg border border-warning/30 rounded-lg p-4">

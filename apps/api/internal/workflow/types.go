@@ -57,6 +57,11 @@ type SignInput struct {
 	SignerUserID       int64
 	ExternalSignerName string // set for external signers (signer_type='external'); ignored for internal
 	SignatureImageHash string
+	// SignatureObjectKey/SizeBytes: when set, the handler has already uploaded the
+	// signature PNG to object storage. The engine records a document_files row
+	// (file_type='signature_image') in-tx and links it via signature_events.signature_file_id.
+	SignatureObjectKey string
+	SignatureSizeBytes int64
 	Comment            string
 	ConsentText        string
 	IPAddress          string

@@ -285,10 +285,11 @@ export const api = {
   getTask: (token: string, taskId: number) =>
     request<Task>(`/signature-tasks/${taskId}`, {}, token),
 
-  sign: (token: string, taskId: number, signatureImageHash: string, comment: string) =>
+  // signatureImage: base64 PNG (or data URL). Server stores the image + computes the hash.
+  sign: (token: string, taskId: number, signatureImage: string, comment: string) =>
     request(`/signature-tasks/${taskId}/sign`, {
       method: "POST",
-      body: JSON.stringify({ signature_image_hash: signatureImageHash, comment }),
+      body: JSON.stringify({ signature_image: signatureImage, comment }),
     }, token),
 
   reject: (token: string, taskId: number, reason: string) =>
@@ -312,10 +313,10 @@ export const api = {
   externalView: (signerToken: string) =>
     externalRequest<ExternalDocView>("/external/document", signerToken),
 
-  externalSign: (signerToken: string, signatureImageHash: string, consentText: string, requestId: string) =>
+  externalSign: (signerToken: string, signatureImage: string, consentText: string, requestId: string) =>
     externalRequest<{ signed: boolean }>("/external/sign", signerToken, {
       method: "POST",
-      body: JSON.stringify({ signature_image_hash: signatureImageHash, consent_text: consentText, request_id: requestId }),
+      body: JSON.stringify({ signature_image: signatureImage, consent_text: consentText, request_id: requestId }),
     }),
 
   // Returns a fetch Response so the caller can stream the PDF into an <iframe> / blob URL.

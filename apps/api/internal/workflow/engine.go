@@ -503,17 +503,33 @@ func createTasksForSequence(ctx context.Context, tx pgx.Tx, docID int64, templat
 }
 
 func writeSignatureEvent(ctx context.Context, tx pgx.Tx, in SignInput, task Task) error {
+	// If the handler uploaded a signature image, record it as a document_files
+	// row (in-tx) and link the event to it via signature_file_id.
+	var fileID *int64
+	if in.SignatureObjectKey != "" {
+		var id int64
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO document_files
+			       (document_id, file_type, object_key, file_hash, mime_type, size_bytes, uploaded_by_user_id)
+			VALUES ($1, 'signature_image', $2, $3, 'image/png', $4, $5)
+			RETURNING id
+		`, task.DocumentID, in.SignatureObjectKey, nullableString(in.SignatureImageHash),
+			in.SignatureSizeBytes, in.SignerUserID).Scan(&id); err != nil {
+			return err
+		}
+		fileID = &id
+	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO signature_events
 		       (task_id, document_id, signer_type, signer_user_id, signer_name, action,
-		        signature_image_hash, comment, consent_text, ip_address, user_agent,
+		        signature_image_hash, signature_file_id, comment, consent_text, ip_address, user_agent,
 		        session_id, request_id, signed_at)
 		SELECT $1, $2, 'internal', $3, u.display_name, 'sign',
-		       $4, $5, $6,
-		       $7::inet, $8, $9, $10, now()
+		       $4, $5, $6, $7,
+		       $8::inet, $9, $10, $11, now()
 		  FROM users u WHERE u.id=$3
 	`, task.ID, task.DocumentID, in.SignerUserID,
-		in.SignatureImageHash, in.Comment, in.ConsentText,
+		in.SignatureImageHash, fileID, in.Comment, in.ConsentText,
 		nullableString(in.IPAddress), in.UserAgent, in.SessionID, in.RequestID,
 	)
 	return err
@@ -578,17 +594,31 @@ func writeExternalSignatureEvent(ctx context.Context, tx pgx.Tx, in SignInput, t
 	if signerName == "" {
 		signerName = "External Signer"
 	}
+	var fileID *int64
+	if in.SignatureObjectKey != "" {
+		var id int64
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO document_files
+			       (document_id, file_type, object_key, file_hash, mime_type, size_bytes, external_signer_id)
+			VALUES ($1, 'signature_image', $2, $3, 'image/png', $4, $5)
+			RETURNING id
+		`, task.DocumentID, in.SignatureObjectKey, nullableString(in.SignatureImageHash),
+			in.SignatureSizeBytes, extSignerID).Scan(&id); err != nil {
+			return err
+		}
+		fileID = &id
+	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO signature_events
 		       (task_id, document_id, signer_type, external_signer_id, signer_name, action,
-		        signature_image_hash, comment, consent_text, ip_address, user_agent,
+		        signature_image_hash, signature_file_id, comment, consent_text, ip_address, user_agent,
 		        request_id, signed_at)
 		VALUES ($1, $2, 'external', $3, $4, 'sign',
-		        $5, $6, $7,
-		        $8::inet, $9,
-		        $10, now())
+		        $5, $6, $7, $8,
+		        $9::inet, $10,
+		        $11, now())
 	`, task.ID, task.DocumentID, extSignerID, signerName,
-		in.SignatureImageHash, in.Comment, in.ConsentText,
+		in.SignatureImageHash, fileID, in.Comment, in.ConsentText,
 		nullableString(in.IPAddress), in.UserAgent,
 		in.RequestID,
 	)

@@ -4,7 +4,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import SignaturePadLib from "signature_pad";
 
 interface Props {
-  onSign: (hash: string) => void;
+  /** Called with the signature as a PNG data URL ("data:image/png;base64,..."). */
+  onSign: (imageDataUrl: string) => void;
   onClear?: () => void;
   disabled?: boolean;
 }
@@ -68,17 +69,12 @@ export default function SignaturePad({ onSign, onClear, disabled }: Props) {
     onClear?.();
   };
 
-  const handleSign = async () => {
+  const handleSign = () => {
     const pad = padRef.current;
     if (!pad || pad.isEmpty()) return;
-    const dataUrl = pad.toDataURL("image/png");
-    // Compute SHA-256 of the base64 data (not the raw image binary — see guardrails).
-    const encoded = new TextEncoder().encode(dataUrl);
-    const hashBuf = await crypto.subtle.digest("SHA-256", encoded);
-    const hashHex = Array.from(new Uint8Array(hashBuf))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-    onSign(hashHex);
+    // Send the actual PNG so it can be stored and stamped onto the final PDF.
+    // The server computes the authoritative SHA-256 of the image bytes.
+    onSign(pad.toDataURL("image/png"));
   };
 
   return (

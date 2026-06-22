@@ -169,26 +169,51 @@ func (h *TaskHandler) Sign(c *gin.Context) {
 	}
 
 	var req struct {
-		SignatureImageHash string `json:"signature_image_hash" binding:"required"`
-		Comment           string `json:"comment"`
-		ConsentText       string `json:"consent_text"`
+		SignatureImage string `json:"signature_image" binding:"required"` // base64 PNG (or data URL)
+		Comment        string `json:"comment"`
+		ConsentText    string `json:"consent_text"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, http.StatusBadRequest, "invalid_request", "signature_image_hash is required")
+		httpx.Error(c, http.StatusBadRequest, "invalid_request", "signature_image is required")
 		return
 	}
-	if strings.TrimSpace(req.SignatureImageHash) == "" {
+	if strings.TrimSpace(req.SignatureImage) == "" {
 		httpx.Error(c, http.StatusBadRequest, "signature_required", "signature is required")
 		return
 	}
 
 	requestID := c.GetString(middleware.RequestIDKey)
-
 	ctx := c.Request.Context()
+
+	// Resolve the document up front so the signature image lands under a stable key.
+	var sigDocID int64
+	if err := h.pool.QueryRow(ctx, `SELECT document_id FROM signature_tasks WHERE id=$1`, taskID).Scan(&sigDocID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(c, http.StatusNotFound, "not_found", "task not found")
+			return
+		}
+		h.log.Error("sign: lookup document", zap.Error(err), zap.Int64("task_id", taskID))
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "sign failed")
+		return
+	}
+
+	// Upload the signature PNG to object storage; engine links it in-tx.
+	objectKey, sigSize, sigHash, errCode := decodeAndStoreSignature(ctx, h.store, sigDocID, taskID, req.SignatureImage)
+	if errCode != "" {
+		status := http.StatusBadRequest
+		if errCode == "storage_error" {
+			status = http.StatusInternalServerError
+		}
+		httpx.Error(c, status, errCode, "signature image could not be processed")
+		return
+	}
+
 	err = h.engine.Sign(ctx, workflow.SignInput{
 		TaskID:             taskID,
 		SignerUserID:       claims.UserID,
-		SignatureImageHash: req.SignatureImageHash,
+		SignatureImageHash: sigHash,
+		SignatureObjectKey: objectKey,
+		SignatureSizeBytes: sigSize,
 		Comment:            req.Comment,
 		ConsentText:        req.ConsentText,
 		IPAddress:          c.ClientIP(),

@@ -278,22 +278,16 @@ func (h *ExternalSignHandler) Sign(c *gin.Context) {
 	}
 
 	var body struct {
-		SignatureImageHash string `json:"signature_image_hash"`
-		ConsentText        string `json:"consent_text"`
-		RequestID          string `json:"request_id"`
+		SignatureImage string `json:"signature_image"` // base64 PNG (or data URL)
+		ConsentText    string `json:"consent_text"`
+		RequestID      string `json:"request_id"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		httpx.Error(c, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 		return
 	}
-	if body.SignatureImageHash == "" {
-		httpx.Error(c, http.StatusBadRequest, "signature_required", "signature_image_hash is required")
-		return
-	}
-	// Cap hash length: SHA-512 hex = 128 chars; allow up to 256 for flexibility.
-	// Reject oversized payloads before any DB work.
-	if len(body.SignatureImageHash) > 256 {
-		httpx.Error(c, http.StatusBadRequest, "invalid_request", "signature_image_hash exceeds maximum length")
+	if strings.TrimSpace(body.SignatureImage) == "" {
+		httpx.Error(c, http.StatusBadRequest, "signature_required", "signature_image is required")
 		return
 	}
 	if body.RequestID == "" {
@@ -308,16 +302,16 @@ func (h *ExternalSignHandler) Sign(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	// Resolve task + state from token hash before calling engine.
-	var taskID int64
+	var taskID, extDocID int64
 	var extStatus, signerName string
 	var expiresAt time.Time
 
 	err := h.pool.QueryRow(ctx, `
-		SELECT st.id, es.status, es.token_expires_at, es.name
+		SELECT st.id, st.document_id, es.status, es.token_expires_at, es.name
 		  FROM external_signers es
 		  JOIN signature_tasks st ON st.external_signer_id = es.id
 		 WHERE es.token_hash=$1
-	`, hash).Scan(&taskID, &extStatus, &expiresAt, &signerName)
+	`, hash).Scan(&taskID, &extDocID, &extStatus, &expiresAt, &signerName)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusUnauthorized, "external_link_invalid", "invalid or missing token")
@@ -333,10 +327,23 @@ func (h *ExternalSignHandler) Sign(c *gin.Context) {
 		return
 	}
 
+	// Upload the signature PNG; engine links it in-tx.
+	objectKey, sigSize, sigHash, upErr := decodeAndStoreSignature(ctx, h.store, extDocID, taskID, body.SignatureImage)
+	if upErr != "" {
+		status := http.StatusBadRequest
+		if upErr == "storage_error" {
+			status = http.StatusInternalServerError
+		}
+		httpx.Error(c, status, upErr, "signature image could not be processed")
+		return
+	}
+
 	if err := h.eng.ExternalSign(ctx, taskID, hash, workflow.SignInput{
 		TaskID:             taskID,
 		ExternalSignerName: signerName,
-		SignatureImageHash: body.SignatureImageHash,
+		SignatureImageHash: sigHash,
+		SignatureObjectKey: objectKey,
+		SignatureSizeBytes: sigSize,
 		ConsentText:        body.ConsentText,
 		IPAddress:          c.ClientIP(),
 		UserAgent:          c.GetHeader("User-Agent"),
