@@ -3,6 +3,7 @@ package pdf
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"time"
@@ -83,9 +84,22 @@ func FinalizeDocument(ctx context.Context, pool *pgxpool.Pool, store *storage.Cl
 		CompletedAt:     updatedAt,
 	}
 
-	pdfBytes, err := BuildEvidencePage(input)
+	evidenceBytes, err := BuildEvidencePage(input)
 	if err != nil {
 		return "", fmt.Errorf("build evidence page: %w", err)
+	}
+
+	// Final PDF = original pages with signatures stamped into their configured
+	// boxes, then the evidence page. If the original can't be loaded/imported or
+	// has no configured slots, fall back to the evidence-only PDF so the document
+	// stays usable (no signing path is blocked by PDF assembly).
+	pdfBytes := evidenceBytes
+	if orig, oerr := loadOriginalBytes(ctx, pool, store, docID); oerr == nil && len(orig) > 0 {
+		if stamps, serr := gatherStamps(ctx, pool, store, docID); serr == nil {
+			if merged, merr := BuildStampedFinal(orig, evidenceBytes, stamps); merr == nil && len(merged) > 0 {
+				pdfBytes = merged
+			}
+		}
 	}
 
 	// Store in MinIO.
@@ -108,6 +122,73 @@ func FinalizeDocument(ctx context.Context, pool *pgxpool.Pool, store *storage.Cl
 	}
 
 	return objectKey, nil
+}
+
+// loadOriginalBytes fetches the original PDF bytes from object storage.
+func loadOriginalBytes(ctx context.Context, pool *pgxpool.Pool, store *storage.Client, docID int64) ([]byte, error) {
+	var key string
+	if err := pool.QueryRow(ctx,
+		`SELECT object_key FROM document_files WHERE document_id=$1 AND file_type='original_pdf' LIMIT 1`, docID,
+	).Scan(&key); err != nil {
+		return nil, err
+	}
+	rc, _, err := store.Get(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	return io.ReadAll(rc)
+}
+
+// gatherStamps collects, for each signed event that has both a stored signature
+// image and a configured slot on its step, the image bytes + normalized box.
+func gatherStamps(ctx context.Context, pool *pgxpool.Pool, store *storage.Client, docID int64) ([]Stamp, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT df.object_key, ws.signature_slot
+		  FROM signature_events se
+		  JOIN signature_tasks st ON st.id = se.task_id
+		  JOIN workflow_steps ws ON ws.id = st.workflow_step_id
+		  JOIN document_files df ON df.id = se.signature_file_id
+		 WHERE se.document_id=$1
+		   AND se.action='sign'
+		   AND se.signature_file_id IS NOT NULL
+		   AND ws.signature_slot IS NOT NULL
+	`, docID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type slot struct {
+		Page int     `json:"page"`
+		X    float64 `json:"x"`
+		Y    float64 `json:"y"`
+		W    float64 `json:"w"`
+		H    float64 `json:"h"`
+	}
+	var stamps []Stamp
+	for rows.Next() {
+		var key string
+		var slotJSON []byte
+		if err := rows.Scan(&key, &slotJSON); err != nil {
+			return nil, err
+		}
+		var s slot
+		if err := json.Unmarshal(slotJSON, &s); err != nil || s.Page < 1 {
+			continue // skip malformed slot rather than fail the whole finalize
+		}
+		rc, _, gerr := store.Get(ctx, key)
+		if gerr != nil {
+			continue
+		}
+		img, rerr := io.ReadAll(rc)
+		rc.Close()
+		if rerr != nil || len(img) == 0 {
+			continue
+		}
+		stamps = append(stamps, Stamp{Page: s.Page, X: s.X, Y: s.Y, W: s.W, H: s.H, PNG: img})
+	}
+	return stamps, rows.Err()
 }
 
 type bytesReadCloser struct{ *bytesReaderImpl }
