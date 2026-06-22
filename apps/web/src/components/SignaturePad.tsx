@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import SignaturePadLib from "signature_pad";
+import { Button } from "@/components/ui";
 
 interface Props {
   /** Called with the signature as a PNG data URL ("data:image/png;base64,..."). */
@@ -79,7 +80,7 @@ export default function SignaturePad({ onSign, onClear, disabled }: Props) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="relative border-2 border-dashed border-gray-300 rounded-xl bg-gray-50 touch-none"
+      <div className="relative border-2 border-dashed border-line-strong rounded-xl bg-surface-muted touch-none"
            style={{ height: 200 }}>
         <canvas
           ref={canvasRef}
@@ -87,34 +88,26 @@ export default function SignaturePad({ onSign, onClear, disabled }: Props) {
           style={{ touchAction: "none" }}
         />
         {isEmpty && (
-          <p className="absolute inset-0 flex items-center justify-center text-gray-400 text-sm pointer-events-none select-none">
+          <p className="absolute inset-0 flex items-center justify-center text-subtle text-sm pointer-events-none select-none">
             วาดลายเซ็นที่นี่
           </p>
         )}
       </div>
 
       {showClearConfirm ? (
-        <div className="flex gap-2 items-center bg-amber-50 border border-amber-300 rounded-lg p-3">
-          <span className="text-sm text-amber-800 flex-1">ยืนยันการล้างลายเซ็น?</span>
-          <button onClick={confirmClear} className="px-3 py-1 bg-amber-500 text-white text-sm rounded-lg">ล้าง</button>
-          <button onClick={() => setShowClearConfirm(false)} className="px-3 py-1 bg-gray-200 text-gray-700 text-sm rounded-lg">ยกเลิก</button>
+        <div className="flex gap-2 items-center bg-warning-bg border border-warning/30 rounded-md p-3">
+          <span className="text-sm text-warning-fg flex-1">ยืนยันการล้างลายเซ็น?</span>
+          <Button variant="danger" size="sm" onClick={confirmClear}>ล้าง</Button>
+          <Button variant="ghost" size="sm" onClick={() => setShowClearConfirm(false)}>ยกเลิก</Button>
         </div>
       ) : (
         <div className="flex gap-2">
-          <button
-            onClick={handleClear}
-            disabled={isEmpty || disabled}
-            className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 disabled:opacity-40 active:scale-95"
-          >
+          <Button variant="outline" className="flex-1" onClick={handleClear} disabled={isEmpty || disabled}>
             ล้างลายเซ็น
-          </button>
-          <button
-            onClick={handleSign}
-            disabled={isEmpty || disabled}
-            className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-40 active:scale-95"
-          >
+          </Button>
+          <Button className="flex-1" onClick={handleSign} disabled={isEmpty || disabled}>
             ยืนยันลายเซ็น
-          </button>
+          </Button>
         </div>
       )}
     </div>
