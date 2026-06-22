@@ -28,7 +28,16 @@ type Stamp struct {
 // (one importer — using a second importer in the same doc collides template ids)
 // and the evidence is drawn natively. Returns an error if the original cannot be
 // imported, so callers can fall back to the evidence-only PDF.
-func BuildStampedFinal(origBytes []byte, evidence EvidenceInput, stamps []Stamp) ([]byte, error) {
+func BuildStampedFinal(origBytes []byte, evidence EvidenceInput, stamps []Stamp) (out []byte, err error) {
+	// gofpdi panics (not errors) on PDFs it cannot parse. Recover so finalize
+	// degrades to the evidence-only PDF instead of crashing the request.
+	defer func() {
+		if r := recover(); r != nil {
+			out = nil
+			err = fmt.Errorf("stamp aborted (unparseable original PDF): %v", r)
+		}
+	}()
+
 	if len(origBytes) == 0 {
 		return nil, fmt.Errorf("empty original PDF")
 	}

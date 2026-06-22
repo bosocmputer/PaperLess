@@ -34,9 +34,9 @@ func realMinIOStore(t *testing.T) *storage.Client {
 	}
 	cfg := &config.Config{}
 	cfg.Storage.Endpoint = endpoint
-	cfg.Storage.AccessKey = "minioadmin"
-	cfg.Storage.SecretKey = "minioadmin"
-	cfg.Storage.Bucket = "paperless"
+	cfg.Storage.AccessKey = getEnvOr("MINIO_TEST_ACCESS_KEY", "minioadmin")
+	cfg.Storage.SecretKey = getEnvOr("MINIO_TEST_SECRET_KEY", "minioadmin")
+	cfg.Storage.Bucket = getEnvOr("MINIO_TEST_BUCKET", "paperless")
 	cfg.Storage.UseSSL = false
 	store, err := storage.New(cfg)
 	if err != nil {
