@@ -257,6 +257,16 @@ export interface RoleOption {
   name: string;
 }
 
+// Attachment row from GET /documents/:id/attachments
+export interface Attachment {
+  id: number;
+  object_key: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  uploaded_by_user_id: number | null;
+  created_at: string;
+}
+
 // Import result from POST /documents/import
 export interface ImportResult {
   id: number;
@@ -401,6 +411,24 @@ export const api = {
 
   deactivateTemplate: (token: string, id: string) =>
     request<{ id: string; status: string }>(`/workflow-templates/${id}/deactivate`, { method: "POST" }, token),
+
+  // ── Attachments ──
+  listAttachments: (token: string, docId: number) =>
+    request<Attachment[]>(`/documents/${docId}/attachments`, {}, token),
+
+  uploadAttachment: (token: string, docId: number, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return importRequest<{ id: number; object_key: string; mime_type: string; size_bytes: number }>(
+      `/documents/${docId}/attachments`, token, fd
+    );
+  },
+
+  deleteAttachment: (token: string, fileId: number) =>
+    request(`/attachments/${fileId}`, { method: "DELETE" }, token),
+
+  // URL for viewing/downloading an attachment (token in query for <a>/<iframe>).
+  attachmentFileUrl: (fileId: number) => `${BASE}/attachments/${fileId}/file`,
 
   // ── Workflow config editor (Phase B) ──
   listUsers: (token: string) => request<UserOption[]>("/users", {}, token),

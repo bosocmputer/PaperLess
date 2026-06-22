@@ -252,6 +252,63 @@ func (h *AttachmentHandler) Delete(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "deleted"})
 }
 
+// Download godoc: GET /attachments/:id/file
+// Streams an attachment inline (header OR ?token= auth). Access is checked
+// against the attachment's parent document (same rule as the original PDF).
+func (h *AttachmentHandler) Download(c *gin.Context) {
+	fileID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.Error(c, http.StatusBadRequest, "invalid_id", "attachment id must be an integer")
+		return
+	}
+	ctx := c.Request.Context()
+
+	var (
+		objectKey string
+		mime      *string
+		docID     int64
+	)
+	err = h.pool.QueryRow(ctx, `
+		SELECT object_key, mime_type, document_id
+		  FROM document_files WHERE id=$1 AND file_type='attachment'
+	`, fileID).Scan(&objectKey, &mime, &docID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusNotFound, "not_found", "attachment not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
+		return
+	}
+
+	claims := middleware.ClaimsFrom(c)
+	allowed, err := canAccessDocument(ctx, h.pool, claims, docID)
+	if err != nil {
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "fetch failed")
+		return
+	}
+	if !allowed {
+		httpx.Error(c, http.StatusForbidden, "forbidden", "not authorized to view this attachment")
+		return
+	}
+
+	rc, size, err := h.store.Get(ctx, objectKey)
+	if err != nil {
+		h.log.Error("download attachment", zap.Error(err), zap.Int64("file_id", fileID))
+		httpx.Error(c, http.StatusInternalServerError, "internal_error", "download failed")
+		return
+	}
+	defer rc.Close()
+
+	contentType := "application/octet-stream"
+	if mime != nil && *mime != "" {
+		contentType = *mime
+	}
+	c.DataFromReader(http.StatusOK, size, contentType, rc, map[string]string{
+		"Content-Disposition": fmt.Sprintf(`inline; filename="attachment_%d"`, fileID),
+	})
+}
+
 func hasAdminRole(claims *auth.Claims) bool {
 	if claims == nil {
 		return false

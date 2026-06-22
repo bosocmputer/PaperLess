@@ -6,6 +6,7 @@ import { api, type ExternalSigner, type InviteResponse, type StepProgress } from
 import { getAccessToken, getUser } from "@/lib/auth";
 import ErrorState from "@/components/ErrorState";
 import SignaturePad from "@/components/SignaturePad";
+import Attachments from "@/components/Attachments";
 import WorkflowProgress from "@/components/WorkflowProgress";
 import { Button, Card, Input, Spinner, StatusBadge } from "@/components/ui";
 
@@ -602,6 +603,11 @@ export default function DocumentPage({ params }: PageProps) {
               onError={() => setPdfError(true)}
             />
           )}
+        </Card>
+
+        {/* Attachments (read-only for signers) */}
+        <Card>
+          <Attachments docId={state.docId} token={token} canEdit={false} />
         </Card>
 
         {/* Signature section */}

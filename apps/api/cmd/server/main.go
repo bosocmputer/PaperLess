@@ -162,6 +162,8 @@ func main() {
 
 	// Standalone attachment delete (by file id, not doc id)
 	v1.DELETE("/attachments/:id", requireAuth, attachH.Delete)
+	// Attachment file download — header OR ?token= so it works in <a>/<img>/<iframe>.
+	v1.GET("/attachments/:id/file", requireAuthFile, attachH.Download)
 
 	// Signature tasks (auth required)
 	taskH := handlers.NewTaskHandler(pool, store, wfEngine, logger)

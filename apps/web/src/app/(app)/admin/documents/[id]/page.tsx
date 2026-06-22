@@ -14,6 +14,7 @@ import {
 import { getAccessToken, getUser } from "@/lib/auth";
 import ErrorState from "@/components/ErrorState";
 import WorkflowProgress from "@/components/WorkflowProgress";
+import Attachments from "@/components/Attachments";
 import { Button, Card, Input, Spinner, StatusBadge } from "@/components/ui";
 
 interface PageProps {
@@ -323,6 +324,11 @@ export default function AdminDocDetailPage({ params }: PageProps) {
               <WorkflowProgress steps={steps} currentSeq={steps.find((s) => !s.complete)?.sequence_no ?? 1} />
             </Card>
           )}
+
+          {/* Attachments */}
+          <Card>
+            <Attachments docId={docId} token={token} canEdit />
+          </Card>
 
           {/* External signers */}
           <Card>
