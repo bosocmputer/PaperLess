@@ -192,12 +192,22 @@ export interface TemplateAssignee {
   display_order: number | null;
 }
 
+// Signature box position, normalized to the page (0..1), top-left origin. page is 1-based.
+export interface SigSlot {
+  page: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface TemplateStep {
   id: string;
   sequence_no: number;
   position_code: string;
   position_name: string;
   condition_type: number;
+  signature_slot?: SigSlot | null;
   assignees: TemplateAssignee[];
 }
 
@@ -228,6 +238,7 @@ export interface StepInput {
   sequence_no: number;
   condition_type: number;
   assignee_user_ids: number[];
+  signature_slot?: SigSlot | null;
 }
 
 // Full user record for the admin user-management page (GET /admin/users)

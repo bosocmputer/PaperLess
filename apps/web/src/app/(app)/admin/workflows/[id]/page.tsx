@@ -2,10 +2,11 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { api, type TemplateDetail, type UserOption, type StepInput } from "@/lib/api";
+import { api, type TemplateDetail, type UserOption, type StepInput, type SigSlot } from "@/lib/api";
 import { getAccessToken, getUser } from "@/lib/auth";
 import ErrorState from "@/components/ErrorState";
 import { Button, Card, Input, Spinner, StatusBadge } from "@/components/ui";
+import SignaturePositionEditor from "@/components/SignaturePositionEditor";
 
 const CONDITIONS = [
   { value: 1, label: "คนใดคนหนึ่งเซ็น" },
@@ -21,6 +22,7 @@ interface EditStep {
   position_name: string;
   condition_type: number;
   assignee_user_ids: number[];
+  signature_slot: SigSlot | null;
 }
 
 let keySeq = 0;
@@ -64,6 +66,7 @@ export default function WorkflowEditPage() {
         position_name: s.position_name,
         condition_type: s.condition_type,
         assignee_user_ids: s.assignees.map((a) => Number(a.user_id)),
+        signature_slot: s.signature_slot ?? null,
       })));
     } catch {
       setError("network_error");
@@ -79,7 +82,7 @@ export default function WorkflowEditPage() {
     setSteps((cur) => cur.map((s) => (s.key === key ? { ...s, ...patch } : s)));
 
   const addStep = () =>
-    setSteps((cur) => [...cur, { key: newKey(), position_code: "", position_name: "", condition_type: 1, assignee_user_ids: [] }]);
+    setSteps((cur) => [...cur, { key: newKey(), position_code: "", position_name: "", condition_type: 1, assignee_user_ids: [], signature_slot: null }]);
 
   const removeStep = (key: string) => setSteps((cur) => cur.filter((s) => s.key !== key));
 
@@ -138,6 +141,7 @@ export default function WorkflowEditPage() {
       sequence_no: i + 1,
       condition_type: s.condition_type,
       assignee_user_ids: s.condition_type === 3 ? [] : s.assignee_user_ids,
+      signature_slot: s.signature_slot ?? null,
     }));
     const res = await api.updateSteps(token, id, payload);
     setSaving(false);
@@ -299,6 +303,25 @@ export default function WorkflowEditPage() {
             )}
           </Card>
         ))}
+
+        {/* Signature positions on the PDF */}
+        {isDraft && steps.length > 0 && (
+          <Card className="flex flex-col gap-3">
+            <div>
+              <p className="text-sm font-semibold text-ink">ตำแหน่งลายเซ็นบนเอกสาร (ไม่บังคับ)</p>
+              <p className="text-xs text-muted mt-0.5">อัปโหลด PDF ตัวอย่างของรูปแบบนี้ แล้วตีกรอบจุดวางลายเซ็นของแต่ละตำแหน่ง — ลายเซ็นจริงจะถูกวางตามกรอบนี้บนเอกสารฉบับสมบูรณ์</p>
+            </div>
+            <SignaturePositionEditor
+              steps={steps.map((s) => ({
+                key: s.key,
+                label: s.position_name.trim() || s.position_code.trim() || "ขั้น",
+                slot: s.signature_slot,
+              }))}
+              onChange={(key, slot) => patchStep(key, { signature_slot: slot })}
+            />
+            <p className="text-xs text-subtle">* กรอบจะถูกบันทึกเมื่อกด “บันทึกขั้นตอน”</p>
+          </Card>
+        )}
 
         {/* Actions */}
         {isDraft && (

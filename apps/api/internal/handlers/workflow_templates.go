@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -112,6 +113,7 @@ type tmplStepDetail struct {
 	PositionCode  string               `json:"position_code"`
 	PositionName  string               `json:"position_name"`
 	ConditionType int                  `json:"condition_type"`
+	SignatureSlot json.RawMessage      `json:"signature_slot,omitempty"`
 	Assignees     []tmplAssigneeDetail `json:"assignees"`
 }
 
@@ -166,7 +168,7 @@ func (h *WorkflowTemplateHandler) GetTemplate(c *gin.Context) {
 	// external-signer steps have no workflow_step_assignees rows).
 	rows, err := h.pool.Query(ctx, `
 		SELECT ws.id, ws.sequence_no, ws.position_code, ws.position_name,
-		       ws.condition_type,
+		       ws.condition_type, ws.signature_slot,
 		       wsa.user_id,    wsa.display_order,
 		       u.username,     u.display_name
 		  FROM workflow_steps ws
@@ -193,13 +195,14 @@ func (h *WorkflowTemplateHandler) GetTemplate(c *gin.Context) {
 			posCode        string
 			posName        string
 			condType       int
+			slot           []byte
 			assigneeUserID *int64
 			displayOrder   *int
 			username       *string
 			displayName    *string
 		)
 		if err := rows.Scan(
-			&stepID, &seqNo, &posCode, &posName, &condType,
+			&stepID, &seqNo, &posCode, &posName, &condType, &slot,
 			&assigneeUserID, &displayOrder,
 			&username, &displayName,
 		); err != nil {
@@ -216,6 +219,9 @@ func (h *WorkflowTemplateHandler) GetTemplate(c *gin.Context) {
 				PositionName:  posName,
 				ConditionType: condType,
 				Assignees:     []tmplAssigneeDetail{},
+			}
+			if len(slot) > 0 {
+				sd.SignatureSlot = json.RawMessage(slot)
 			}
 			stepMap[stepID] = &sd
 			stepOrder = append(stepOrder, stepID)

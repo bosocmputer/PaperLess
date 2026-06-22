@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -174,12 +175,30 @@ func (h *WorkflowTemplateHandler) Update(c *gin.Context) {
 
 // ── UpdateSteps (replace-all) ──────────────────────────────────────────────────
 
+// sigSlot is a signature box position, normalized to the page (0..1) so it is
+// resolution-independent. page is 1-based. nil = no on-PDF placement for the step.
+type sigSlot struct {
+	Page int     `json:"page"`
+	X    float64 `json:"x"`
+	Y    float64 `json:"y"`
+	W    float64 `json:"w"`
+	H    float64 `json:"h"`
+}
+
+func (s sigSlot) valid() bool {
+	const eps = 0.001
+	return s.Page >= 1 &&
+		s.X >= 0 && s.Y >= 0 && s.W > 0 && s.H > 0 &&
+		s.X+s.W <= 1+eps && s.Y+s.H <= 1+eps
+}
+
 type stepInput struct {
-	PositionCode    string  `json:"position_code"`
-	PositionName    string  `json:"position_name"`
-	SequenceNo      int     `json:"sequence_no"`
-	ConditionType   int     `json:"condition_type"`
-	AssigneeUserIDs []int64 `json:"assignee_user_ids"`
+	PositionCode    string   `json:"position_code"`
+	PositionName    string   `json:"position_name"`
+	SequenceNo      int      `json:"sequence_no"`
+	ConditionType   int      `json:"condition_type"`
+	AssigneeUserIDs []int64  `json:"assignee_user_ids"`
+	SignatureSlot   *sigSlot `json:"signature_slot,omitempty"`
 }
 
 type updateStepsBody struct {
@@ -237,6 +256,11 @@ func (h *WorkflowTemplateHandler) UpdateSteps(c *gin.Context) {
 		posSeen[s.PositionCode] = true
 		if s.ConditionType < 1 || s.ConditionType > 3 {
 			httpx.Error(c, http.StatusBadRequest, "invalid_request", "condition_type must be 1, 2, or 3")
+			return
+		}
+		if s.SignatureSlot != nil && !s.SignatureSlot.valid() {
+			httpx.Error(c, http.StatusBadRequest, "invalid_signature_slot",
+				"signature position must be within the page (normalized 0–1)")
 			return
 		}
 		if s.ConditionType == 3 {
@@ -315,13 +339,17 @@ func (h *WorkflowTemplateHandler) UpdateSteps(c *gin.Context) {
 
 	for i := range body.Steps {
 		s := &body.Steps[i]
+		var slotJSON []byte
+		if s.SignatureSlot != nil {
+			slotJSON, _ = json.Marshal(s.SignatureSlot) // validated above
+		}
 		var stepID int64
 		err = tx.QueryRow(ctx, `
 			INSERT INTO workflow_steps
-			       (workflow_template_id, position_code, position_name, sequence_no, condition_type)
-			VALUES ($1, $2, $3, $4, $5)
+			       (workflow_template_id, position_code, position_name, sequence_no, condition_type, signature_slot)
+			VALUES ($1, $2, $3, $4, $5, $6)
 			RETURNING id
-		`, tmplID, s.PositionCode, s.PositionName, s.SequenceNo, s.ConditionType).Scan(&stepID)
+		`, tmplID, s.PositionCode, s.PositionName, s.SequenceNo, s.ConditionType, slotJSON).Scan(&stepID)
 		if err != nil {
 			h.log.Error("update steps: insert step", zap.Error(err))
 			httpx.Error(c, http.StatusInternalServerError, "internal_error", "update failed")
