@@ -9,6 +9,8 @@ import (
 	"github.com/jung-kurt/gofpdf/contrib/gofpdi"
 )
 
+const ptToMM = 25.4 / 72.0
+
 // Stamp is one signature image to place on the original PDF.
 // X/Y/W/H are normalized to the page (0..1), top-left origin. Page is 1-based.
 type Stamp struct {
@@ -22,19 +24,18 @@ type Stamp struct {
 
 // BuildStampedFinal produces the final PDF: the original pages with each
 // signature image stamped into its configured box, followed by the evidence
-// page(s). Everything is assembled in one point-unit gofpdf document; the
-// original and evidence are imported via gofpdi (their MediaBox sizes are
-// preserved). Returns an error if the original cannot be imported — callers
-// should fall back to the evidence-only PDF so the document stays usable.
-func BuildStampedFinal(origBytes, evidenceBytes []byte, stamps []Stamp) ([]byte, error) {
+// page. The document is mm-unit; the original is imported via gofpdf/contrib/gofpdi
+// (one importer — using a second importer in the same doc collides template ids)
+// and the evidence is drawn natively. Returns an error if the original cannot be
+// imported, so callers can fall back to the evidence-only PDF.
+func BuildStampedFinal(origBytes []byte, evidence EvidenceInput, stamps []Stamp) ([]byte, error) {
 	if len(origBytes) == 0 {
 		return nil, fmt.Errorf("empty original PDF")
 	}
 
-	pdf := gofpdf.New("P", "pt", "A4", "")
+	pdf := gofpdf.New("P", "mm", "A4", "")
 	pdf.SetAutoPageBreak(false, 0)
 
-	// ── Original pages + signature stamps ──
 	imp := gofpdi.NewImporter()
 	var rs io.ReadSeeker = bytes.NewReader(origBytes)
 	first := imp.ImportPageFromStream(pdf, &rs, 1, "/MediaBox")
@@ -50,15 +51,14 @@ func BuildStampedFinal(origBytes, evidenceBytes []byte, stamps []Stamp) ([]byte,
 			tpl = imp.ImportPageFromStream(pdf, &rs, i, "/MediaBox")
 		}
 		box := sizes[i]["/MediaBox"]
-		w, h := box["w"], box["h"]
+		wmm, hmm := box["w"]*ptToMM, box["h"]*ptToMM
 		orient := "P"
-		if w > h {
+		if wmm > hmm {
 			orient = "L"
 		}
-		pdf.AddPageFormat(orient, gofpdf.SizeType{Wd: w, Ht: h})
-		imp.UseImportedTemplate(pdf, tpl, 0, 0, w, h)
+		pdf.AddPageFormat(orient, gofpdf.SizeType{Wd: wmm, Ht: hmm})
+		imp.UseImportedTemplate(pdf, tpl, 0, 0, wmm, hmm)
 
-		// Stamp signatures whose slot is on this page.
 		for j, st := range stamps {
 			if st.Page != i || len(st.PNG) == 0 {
 				continue
@@ -66,32 +66,16 @@ func BuildStampedFinal(origBytes, evidenceBytes []byte, stamps []Stamp) ([]byte,
 			name := fmt.Sprintf("sig_p%d_%d", i, j)
 			opt := gofpdf.ImageOptions{ImageType: "PNG"}
 			pdf.RegisterImageOptionsReader(name, opt, bytes.NewReader(st.PNG))
-			// Normalized (top-left) → points. gofpdf image origin is also top-left.
-			pdf.ImageOptions(name, st.X*w, st.Y*h, st.W*w, st.H*h, false, opt, 0, "")
+			// Normalized top-left → mm. gofpdf image origin is top-left.
+			pdf.ImageOptions(name, st.X*wmm, st.Y*hmm, st.W*wmm, st.H*hmm, false, opt, 0, "")
 		}
 	}
 
-	// ── Evidence page(s), imported from the existing evidence PDF ──
-	if len(evidenceBytes) > 0 {
-		impE := gofpdi.NewImporter()
-		var rsE io.ReadSeeker = bytes.NewReader(evidenceBytes)
-		te := impE.ImportPageFromStream(pdf, &rsE, 1, "/MediaBox")
-		es := impE.GetPageSizes()
-		for i := 1; i <= len(es); i++ {
-			tpl := te
-			if i > 1 {
-				tpl = impE.ImportPageFromStream(pdf, &rsE, i, "/MediaBox")
-			}
-			box := es[i]["/MediaBox"]
-			w, h := box["w"], box["h"]
-			orient := "P"
-			if w > h {
-				orient = "L"
-			}
-			pdf.AddPageFormat(orient, gofpdf.SizeType{Wd: w, Ht: h})
-			impE.UseImportedTemplate(pdf, tpl, 0, 0, w, h)
-		}
-	}
+	// Evidence page — drawn natively (mm), re-enabling auto page-break so a long
+	// signer table paginates.
+	pdf.SetAutoPageBreak(true, 15)
+	pdf.AddPage()
+	DrawEvidenceBody(pdf, evidence)
 
 	var buf bytes.Buffer
 	if err := pdf.Output(&buf); err != nil {

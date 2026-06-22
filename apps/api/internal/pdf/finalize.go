@@ -96,7 +96,7 @@ func FinalizeDocument(ctx context.Context, pool *pgxpool.Pool, store *storage.Cl
 	pdfBytes := evidenceBytes
 	if orig, oerr := loadOriginalBytes(ctx, pool, store, docID); oerr == nil && len(orig) > 0 {
 		if stamps, serr := gatherStamps(ctx, pool, store, docID); serr == nil {
-			if merged, merr := BuildStampedFinal(orig, evidenceBytes, stamps); merr == nil && len(merged) > 0 {
+			if merged, merr := BuildStampedFinal(orig, input, stamps); merr == nil && len(merged) > 0 {
 				pdfBytes = merged
 			}
 		}
