@@ -6,3 +6,4 @@ export { default as Badge, type Tone } from "./Badge";
 export { default as StatusBadge } from "./StatusBadge";
 export { default as Spinner } from "./Spinner";
 export { default as Input } from "./Input";
+export { default as Icon } from "./Icon";
