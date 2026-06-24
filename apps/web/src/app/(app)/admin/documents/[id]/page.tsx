@@ -30,9 +30,6 @@ function formatDateTime(raw: string): string {
   return d.toLocaleString("th-TH");
 }
 
-const DOC_STATUS_LABELS: Record<string, string> = {
-  imported: "นำเข้าแล้ว", pending: "รอเซ็น", rejected: "ส่งคืน", completed: "เสร็จสิ้น", cancelled: "ยกเลิก",
-};
 
 function isAdminRole(roles: string[]): boolean {
   return roles.some((r) => ["document_admin", "system_admin", "auditor"].includes(r));
